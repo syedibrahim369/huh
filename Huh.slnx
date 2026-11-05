@@ -1,0 +1,27 @@
+<Solution>
+  <Configurations>
+    <Platform Name="x64" />
+    <Platform Name="ARM64" />
+  </Configurations>
+  <Folder Name="/src/">
+    <Project Path="src/Huh.App/Huh.App.csproj">
+      <Platform Solution="*|x64" Project="x64" />
+      <Platform Solution="*|ARM64" Project="ARM64" />
+      <Deploy />
+    </Project>
+    <Project Path="src/Huh.Core/Huh.Core.csproj" />
+  </Folder>
+  <Folder Name="/tools/">
+    <Project Path="tools/Huh.TestHarness/Huh.TestHarness.csproj" />
+    <Project Path="tools/Huh.Probe/Huh.Probe.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Huh.Tests/Huh.Tests.csproj" />
+  </Folder>
+  <Folder Name="/Solution Items/">
+    <File Path="Directory.Build.props" />
+    <File Path="Directory.Packages.props" />
+    <File Path=".gitignore" />
+    <File Path="NOTES.md" />
+  </Folder>
+</Solution>

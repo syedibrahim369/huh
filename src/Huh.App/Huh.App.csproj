@@ -1,0 +1,56 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows10.0.26100.0</TargetFramework>
+    <TargetPlatformMinVersion>10.0.17763.0</TargetPlatformMinVersion>
+    <AssemblyName>Huh</AssemblyName>
+    <RootNamespace>Huh</RootNamespace>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <Platforms>x64;ARM64</Platforms>
+    <RuntimeIdentifiers>win-x64;win-arm64</RuntimeIdentifiers>
+    <PublishProfile>win-$(Platform).pubxml</PublishProfile>
+    <UseWinUI>true</UseWinUI>
+    <WinUISDKReferences>false</WinUISDKReferences>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <!-- Unpackaged + self-contained Windows App SDK for the dev loop (launchable from the CLI).
+         EnableMsixTooling stays on: unpackaged apps still need it for resources.pri.
+         MSIX packaging is an optional M6 task (flip WindowsPackageType back to MSIX). -->
+    <WindowsPackageType>None</WindowsPackageType>
+    <WindowsAppSDKSelfContained>true</WindowsAppSDKSelfContained>
+    <EnableMsixTooling>true</EnableMsixTooling>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Content Include="Assets\SplashScreen.scale-200.png" />
+    <Content Include="Assets\LockScreenLogo.scale-200.png" />
+    <Content Include="Assets\Square150x150Logo.scale-200.png" />
+    <Content Include="Assets\Square44x44Logo.scale-200.png" />
+    <Content Include="Assets\Square44x44Logo.targetsize-24_altform-unplated.png" />
+    <Content Include="Assets\StoreLogo.png" />
+    <Content Include="Assets\Wide310x150Logo.scale-200.png" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Manifest Include="$(ApplicationManifest)" />
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(DisableMsixProjectCapabilityAddedByProject)'!='true' and '$(EnableMsixTooling)'=='true'">
+    <ProjectCapability Include="Msix" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Windows.SDK.BuildTools" />
+    <PackageReference Include="Microsoft.WindowsAppSDK" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Huh.Core\Huh.Core.csproj" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <PublishReadyToRun Condition="'$(Configuration)' == 'Debug'">False</PublishReadyToRun>
+    <PublishReadyToRun Condition="'$(Configuration)' != 'Debug'">True</PublishReadyToRun>
+    <PublishTrimmed Condition="'$(Configuration)' == 'Debug'">False</PublishTrimmed>
+    <PublishTrimmed Condition="'$(Configuration)' != 'Debug'">True</PublishTrimmed>
+  </PropertyGroup>
+</Project>
