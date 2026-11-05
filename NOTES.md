@@ -35,16 +35,46 @@ tests/Huh.Tests      xUnit v3 (Microsoft.Testing.Platform runner)
 - AI-chosen actions carry parameters that are validated (ms-settings from a fixed list, folders must exist locally, search query built by huh).
   Dialog text is untrusted input (prompt-injection vector).
 
+### M1 detection design
+- `DialogMonitor` (Core) = WinEvent hooks (own thread + message loop) + UIA WindowOpened (desktop subtree) feeding ONE MTA
+  worker thread. Hook callbacks only filter/forward; UIA reads happen on the worker (never on a UI/STA thread).
+- Cheap pre-filter before any UIA call: class `#32770`, known dialog classes (`OperationStatusWindow`), DIALOGSTART/ALERT,
+  UIA IsDialog, or an error-ish title. Everything else is skipped.
+- Content is read **only via UIA** (one `FindAllBuildCache` round trip). Win32 is used for metadata only: class, caption,
+  pid, and the MessageBox icon's *resource id* (`STM_GETICON` + `GetIconInfoEx`; no pixels).
+- Classifier is pure and unit-tested: error words / error codes / error icon > question phrasing > warning > info.
+- De-dupe: same hwnd, or same (pid, title, message), within 3 s. Own process always ignored.
+- UIA timeouts set to 1.5 s (IUIAutomation2) so a hung app can't stall the worker; reads retry 3x with backoff.
+- Verified with `Huh.Probe score`: 28/28 error dialogs, 0/6 false positives, three consecutive runs; p50 ~167 ms.
+  Idle cost ~0.9% of one core, 37 MB. Report: `docs/reports/m1-detection.md`.
+- Caveat: the text rules were written before the first run, but the harness and the rules come from the same author.
+  Real-world precision will be lower; the per-app exclusion list (M6) is the safety valve.
+
 ## Gotchas
 - `SupportedOSPlatformVersion` can't be set globally: `net10.0-windows` has TargetPlatformVersion 7.0 (NETSDK1135).
 - .NET 10 SDK: `dotnet test` needs `"test": {"runner": "Microsoft.Testing.Platform"}` in global.json for xUnit v3; use `dotnet test --project ...`.
 - TaskDialog needs a Common Controls v6 manifest dependency (harness has one).
 - Mica/Acrylic render the inactive fallback in a never-activated window, so force `IsInputActive=true` (M2).
 - `Window.Activate()` steals focus, so show the bubble with `SW_SHOWNOACTIVATE` (M2).
+- CsWin32: `CsWin32RunAsBuildTask=true` + `allowMarshaling:true` gives `[GeneratedComInterface]` COM (trim-safe).
+  `allowMarshaling:false` gives raw vtable structs instead. Some shell structs (SHELLEXECUTEINFOW) need a concrete PlatformTarget.
+- **UIA does not expose the icon type** of a MessageBox (unnamed Static image) or TaskDialog ("MainInstructionIcon").
+  `STM_GETICON` handles don't match `LoadIcon(NULL, IDI_*)` (MessageBox loads DPI-scaled copies), but `GetIconInfoEx` resource ids
+  do: imageres #98 error, #84 warning, #81 info, #99 question (module name is a datafile handle string); csrss hard-error boxes use
+  user32 #32513..32516. TaskDialog icon type is still unknown, so TaskDialogs rely on text cues.
+- `EVENT_SYSTEM_SOUND` never fired for MessageBox on this machine, so it's not usable as a severity signal.
+- TaskDialog: UIA hides `DirectUIHWND`; identify it by AutomationIds (`MainInstruction`, `ContentText`, `CommandButton_*`).
+- Caption buttons can have AutomationIds like `Minimize-Restore`; filter by prefix + empty ClassName.
+- Explorer text contains U+200E bidi marks; strip Unicode Format chars.
+- msiexec's dialog times out (`0x80131505`) on the first UIA read while the process starts up, so reads must retry.
+- Shell "File In Use" is an `OperationStatusWindow` (not #32770) and only appears if another process holds the lock and the
+  IFileOperation has an owner window.
+- The csrss hard-error box ("code execution cannot proceed") IS readable from medium IL.
+- Harness `run` scenarios that spawn helpers (rundll32/regsvr32/msiexec) report the helper's process; the probe matches by name.
 
 ## Milestones
 - [x] M0 Setup
-- [ ] M1 Detection
+- [x] M1 Detection (UIPI path implemented; needs an elevated-harness run to verify, see below)
 - [ ] M2 Bubble
 - [ ] M3 Deterministic decoding
 - [ ] M4 AI explanation (opt-in)
@@ -52,4 +82,8 @@ tests/Huh.Tests      xUnit v3 (Microsoft.Testing.Platform runner)
 - [ ] M6 Polish
 
 ## Left / ideas
+- Verify the UIPI path: an elevated harness dialog should come through as `BlockedByUipi=true` (needs a UAC click).
+- Localized dialogs: text cues are English-only. MessageBoxes are covered by the icon signal; TaskDialogs are not.
+- Chromium/Edge in-page `alert()` and XAML ContentDialogs: UIA element path exists (IsDialog) but is not in the harness yet.
+- Harness/probe: `dotnet build` both, then `tools/Huh.Probe/bin/Debug/net10.0-windows/Huh.Probe.exe score` (`--verbose` dumps UIA trees).
 - Check Gemini free-tier RPM/RPD on https://aistudio.google.com/rate-limit (login required).
