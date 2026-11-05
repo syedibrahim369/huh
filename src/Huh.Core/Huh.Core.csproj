@@ -8,6 +8,8 @@
     <!-- CsWin32 as a build task emits [GeneratedComInterface]/[LibraryImport] code (trim/AOT-safe COM for UI Automation). -->
     <CsWin32RunAsBuildTask>true</CsWin32RunAsBuildTask>
     <DisableRuntimeMarshalling>true</DisableRuntimeMarshalling>
+    <!-- huh requires Windows 10 1809+ (app TargetPlatformMinVersion); net10.0-windows can't express that here (TPV 7.0). -->
+    <NoWarn>$(NoWarn);CA1416</NoWarn>
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="Microsoft.Windows.CsWin32" PrivateAssets="all" />

@@ -18,7 +18,7 @@ internal sealed record Classification(DialogKind Kind, DialogSeverity Severity, 
 internal static partial class DialogClassifier
 {
     // English-only for now; localized dialogs rely on the icon signal (see NOTES.md).
-    [GeneratedRegex(@"\b(error|errors|fail(ed|ure|s)?|fatal|denied|cannot|can't|can ?not|could ?n[o']t|unable|not found|can't find|cannot find|missing|invalid|corrupt(ed)?|crash(ed)?|stopped working|not responding|exception|problem|refused|expired|not ready|not enough|insufficient|violation|unexpected|unhandled|blocked|couldn't|wasn't able|went wrong|not (be )?(read|written|opened|loaded|found|available|connected))\b",
+    [GeneratedRegex(@"\b(error|errors|fail(ed|ure|s)?|fatal|denied|cannot|can't|can ?not|could ?n[o']t|unable|not found|can't find|cannot find|missing|invalid|corrupt(ed)?|crash(ed)?|stopped working|not responding|exception|problem|refused|expired|not ready|not enough|insufficient|violation|unexpected|unhandled|blocked|couldn't|wasn't able|went wrong|not (be )?(read|written|opened|loaded|found|available|connected)|(do ?n[o']t|doesn't|does not|don't) have (the )?(required |necessary )?(permissions?|access|rights)|permission (is )?(denied|required)|not (allowed|permitted|authori[sz]ed)|isn't allowed|unauthori[sz]ed)\b",
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
     private static partial Regex ErrorWords();
 

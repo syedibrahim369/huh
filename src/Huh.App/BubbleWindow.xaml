@@ -5,8 +5,10 @@
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     Title="huh">
 
-    <Grid x:Name="Root" VerticalAlignment="Top" Padding="16,12,8,14" RowSpacing="6">
+    <Grid x:Name="Root" VerticalAlignment="Top" Padding="16,10,8,10" RowSpacing="8">
         <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
@@ -24,34 +26,49 @@
             <TextBlock Grid.Column="1" Text="huh?" VerticalAlignment="Center"
                        Style="{StaticResource CaptionTextBlockStyle}"
                        Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-            <Button x:Name="DismissButton" Grid.Column="2" Width="32" Height="28" Padding="0"
+            <Button Grid.Column="2" Width="32" Height="28" Padding="0"
                     Background="Transparent" BorderThickness="0"
                     ToolTipService.ToolTip="Dismiss" AutomationProperties.Name="Dismiss" Click="OnDismiss">
                 <FontIcon FontSize="10" Glyph="&#xE8BB;" />
             </Button>
         </Grid>
 
-        <!-- What the dialog is about -->
+        <!-- What went wrong, in one line -->
         <TextBlock x:Name="Headline" Grid.Row="1" Margin="0,0,8,0"
-                   Style="{StaticResource BodyStrongTextBlockStyle}" TextWrapping="Wrap" MaxLines="2" TextTrimming="CharacterEllipsis" />
-        <TextBlock x:Name="Detail" Grid.Row="2" Margin="0,0,8,0"
-                   Style="{StaticResource BodyTextBlockStyle}" TextWrapping="Wrap" MaxLines="4" TextTrimming="CharacterEllipsis"
+                   Style="{StaticResource BodyStrongTextBlockStyle}" TextWrapping="Wrap" MaxLines="3" TextTrimming="CharacterEllipsis" />
+
+        <!-- Decoded error codes (filled in code), or a short excerpt when there are none -->
+        <StackPanel x:Name="CodesPanel" Grid.Row="2" Spacing="6" Margin="0,0,8,0" />
+        <TextBlock x:Name="Excerpt" Grid.Row="2" Margin="0,0,8,0" Visibility="Collapsed"
+                   Style="{StaticResource BodyTextBlockStyle}" TextWrapping="Wrap" MaxLines="3" TextTrimming="CharacterEllipsis"
                    Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
 
-        <!-- Where it came from -->
-        <Grid Grid.Row="3" Margin="0,6,8,0" ColumnSpacing="6" BorderThickness="0,1,0,0" Padding="0,8,0,0"
+        <!-- Where it came from + trust badge -->
+        <Grid Grid.Row="3" Margin="0,2,8,0" Padding="0,8,0,0" ColumnSpacing="8" BorderThickness="0,1,0,0"
               BorderBrush="{ThemeResource DividerStrokeColorDefaultBrush}">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="Auto" />
                 <ColumnDefinition Width="*" />
             </Grid.ColumnDefinitions>
-            <FontIcon FontSize="12" Glyph="&#xECAA;" VerticalAlignment="Top" Margin="0,2,0,0"
-                      Foreground="{ThemeResource TextFillColorTertiaryBrush}" />
+            <FontIcon x:Name="BadgeIcon" FontSize="14" Glyph="&#xE73E;" VerticalAlignment="Top" Margin="0,2,0,0" />
             <StackPanel Grid.Column="1">
-                <TextBlock x:Name="SourceName" Style="{StaticResource CaptionTextBlockStyle}" />
-                <TextBlock x:Name="SourcePath" Style="{StaticResource CaptionTextBlockStyle}" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis"
-                           Foreground="{ThemeResource TextFillColorTertiaryBrush}" />
+                <TextBlock x:Name="SourceName" Style="{StaticResource BodyStrongTextBlockStyle}" FontSize="12"
+                           TextWrapping="NoWrap" TextTrimming="CharacterEllipsis" />
+                <TextBlock x:Name="BadgeText" Style="{StaticResource CaptionTextBlockStyle}" TextWrapping="Wrap" MaxLines="2" />
             </StackPanel>
         </Grid>
+
+        <!-- Expand / collapse full details -->
+        <HyperlinkButton x:Name="DetailsToggle" Grid.Row="4" Padding="0,2" Margin="0,-2,0,0" Click="OnToggleDetails">
+            <StackPanel Orientation="Horizontal" Spacing="4">
+                <TextBlock x:Name="DetailsToggleText" Text="Show details" Style="{StaticResource CaptionTextBlockStyle}" />
+                <FontIcon x:Name="DetailsChevron" FontSize="10" Glyph="&#xE70D;" />
+            </StackPanel>
+        </HyperlinkButton>
+
+        <ScrollViewer x:Name="DetailsPanel" Grid.Row="5" Visibility="Collapsed" MaxHeight="260" Margin="0,0,4,2"
+                      VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+            <RichTextBlock x:Name="DetailsText" FontSize="12" TextWrapping="Wrap" IsTextSelectionEnabled="True" Margin="0,0,8,0" />
+        </ScrollViewer>
     </Grid>
 </Window>

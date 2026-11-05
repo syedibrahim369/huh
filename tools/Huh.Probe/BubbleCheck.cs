@@ -212,6 +212,116 @@ internal static class BubbleCheck
         bmp.Save(Path.Combine(ctx.OutDir, name + ".png"), ImageFormat.Png);
     }
 
+    /// <summary>
+    /// Waits for huh (already running) to show its next bubble, then saves a screenshot cropped to that bubble and its dialog.
+    /// The dialog rectangle comes from huh's log ("anchor=l,t,r,b"), so embedded dialogs (browser alerts) crop correctly too.
+    /// </summary>
+    public static int Snap(string outPath, int timeoutMs, int settleMs)
+    {
+        string log = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "huh", "logs", "huh.log");
+        long start = File.Exists(log) ? new FileInfo(log).Length : 0;
+        var huh = Process.GetProcessesByName("Huh").FirstOrDefault();
+        if (huh is null) { Console.Error.WriteLine("huh is not running"); return 2; }
+
+        // huh logs:  "bubble 0xB: show beside dialog 0xD (...)"  then  "bubble 0xB: anchor=l,t,r,b"
+        string? showLine = null, anchorLine = null;
+        for (var sw = Stopwatch.StartNew(); sw.ElapsedMilliseconds < timeoutMs && anchorLine is null; Thread.Sleep(100))
+        {
+            var lines = ReadFrom(log, start).Split('\n');
+            anchorLine = lines.FirstOrDefault(l => l.Contains(": anchor="));
+            showLine = lines.FirstOrDefault(l => l.Contains("show beside dialog 0x"));
+        }
+        if (anchorLine is null || showLine is null) { Console.Error.WriteLine("no bubble within timeout"); return 1; }
+
+        var nums = anchorLine[(anchorLine.IndexOf("anchor=", StringComparison.Ordinal) + 7)..].Trim().Split(',').Select(int.Parse).ToArray();
+        var anchor = new PxRect(nums[0], nums[1], nums[2], nums[3]);
+        nint bubble = HexAfter(anchorLine, "bubble 0x");
+        nint dialog = HexAfter(showLine, "dialog 0x");
+
+        // Make sure what we capture is really the dialog + bubble (a background-launched dialog can open BEHIND other windows,
+        // and then the crop would capture the user's screen instead).
+        ForceForeground(dialog);
+        Thread.Sleep(settleMs);
+        var b = CoreScreen.FrameBounds(bubble);
+        if (b is null) { Console.Error.WriteLine("bubble window not found"); return 1; }
+        if (!TopmostAt(anchor, dialog) || !TopmostAt(b.Value, bubble))
+        {
+            Console.Error.WriteLine("dialog or bubble is covered by another window; NOT saving a screenshot");
+            return 1;
+        }
+
+        // Capture the union, then blank every pixel that is not the dialog or the bubble: nothing else on screen can leak.
+        var bounds = CoreScreen.GetMonitors()[0].Bounds;
+        int l = Math.Max(Math.Min(anchor.Left, b.Value.Left), bounds.Left), t = Math.Max(Math.Min(anchor.Top, b.Value.Top), bounds.Top);
+        int r = Math.Min(Math.Max(anchor.Right, b.Value.Right), bounds.Right), btm = Math.Min(Math.Max(anchor.Bottom, b.Value.Bottom), bounds.Bottom);
+        using var shot = new Bitmap(r - l, btm - t);
+        using (var g = Graphics.FromImage(shot)) g.CopyFromScreen(l, t, 0, 0, shot.Size);
+
+        const int pad = 16;
+        using var outBmp = new Bitmap(shot.Width + 2 * pad, shot.Height + 2 * pad);
+        using (var g = Graphics.FromImage(outBmp))
+        {
+            g.Clear(Color.FromArgb(0x5A, 0x5F, 0x66)); // neutral backdrop instead of the real desktop
+            g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+            foreach (var rect in new[] { anchor, b.Value })
+            {
+                // Inset 1 px and round the corners (Windows 11: 8 DIP) so no desktop pixels survive at edges/corners.
+                var src = new Rectangle(rect.Left - l + 1, rect.Top - t + 1, rect.Width - 2, rect.Height - 2);
+                var dst = new Rectangle(src.X + pad, src.Y + pad, src.Width, src.Height);
+                using var path = RoundedRect(dst, 10);
+                g.SetClip(path);
+                g.DrawImage(shot, dst, src, GraphicsUnit.Pixel);
+                g.ResetClip();
+            }
+        }
+        Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(outPath))!);
+        outBmp.Save(outPath, ImageFormat.Png);
+        Console.WriteLine($"saved {outPath} ({outBmp.Width}x{outBmp.Height}) anchor {anchor} bubble {b.Value}");
+        return 0;
+    }
+
+    private static System.Drawing.Drawing2D.GraphicsPath RoundedRect(Rectangle r, int radius)
+    {
+        int d = radius * 2;
+        var p = new System.Drawing.Drawing2D.GraphicsPath();
+        p.AddArc(r.X, r.Y, d, d, 180, 90);
+        p.AddArc(r.Right - d, r.Y, d, d, 270, 90);
+        p.AddArc(r.Right - d, r.Bottom - d, d, d, 0, 90);
+        p.AddArc(r.X, r.Bottom - d, d, d, 90, 90);
+        p.CloseFigure();
+        return p;
+    }
+
+    private static nint HexAfter(string s, string marker)
+    {
+        int i = s.IndexOf(marker, StringComparison.Ordinal) + marker.Length;
+        int j = i;
+        while (j < s.Length && Uri.IsHexDigit(s[j])) j++;
+        return (nint)Convert.ToInt64(s[i..j], 16);
+    }
+
+    /// <summary>Is <paramref name="expected"/> (or a window inside it) the topmost window at the center and all four corners (inset)?</summary>
+    private static bool TopmostAt(PxRect r, nint expected)
+    {
+        int inset = 12;
+        (int X, int Y)[] pts = [r.Center, (r.Left + inset, r.Top + inset), (r.Right - inset, r.Top + inset), (r.Left + inset, r.Bottom - inset), (r.Right - inset, r.Bottom - inset)];
+        foreach (var (x, y) in pts)
+        {
+            var h = WindowFromPoint(new POINT { X = x, Y = y });
+            if (h != expected && GetAncestor(h, 2 /*GA_ROOT*/) != expected)
+            {
+                var root = GetAncestor(h, 2);
+                Console.Error.WriteLine($"  covered at ({x},{y}) by {Describe(root)}, expected 0x{expected:X} {ClassOf(expected)}");
+                return false;
+            }
+        }
+        return true;
+    }
+
+    [StructLayout(LayoutKind.Sequential)] private struct POINT { public int X, Y; }
+    [DllImport("user32.dll")] private static extern nint WindowFromPoint(POINT p);
+    [DllImport("user32.dll")] private static extern nint GetAncestor(nint h, uint flags);
+
     private static string ReadFrom(string path, long offset)
     {
         try

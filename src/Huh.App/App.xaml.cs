@@ -1,4 +1,5 @@
 ﻿using Huh.Core.Detection;
+using Huh.Core.Facts;
 using Microsoft.UI.Dispatching;
 using Microsoft.UI.Xaml;
 
@@ -29,7 +30,12 @@ public partial class App : Application
         _monitor.DialogDetected += d =>
         {
             DevLog.Write($"detected 0x{d.Hwnd:X} {d.Process.Name} {d.Severity} blocked={d.BlockedByUipi} {d.LatencyMs:F0}ms");
-            if (d.IsError || d.BlockedByUipi) ui.TryEnqueue(() => _bubbles.Show(d));
+            if (!(d.IsError || d.BlockedByUipi)) return;
+            // Still on the monitor worker thread: decoding + WinVerifyTrust stay off the UI thread.
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            var facts = FactsBuilder.Build(d);
+            DevLog.Write($"facts for 0x{d.Hwnd:X}: {facts.Codes.Count} code(s), source {facts.Source.Kind}/{facts.Source.Signature.State} in {sw.ElapsedMilliseconds} ms");
+            ui.TryEnqueue(() => _bubbles.Show(facts));
         };
         _monitor.DialogClosed += h => { DevLog.Write($"dialog 0x{h:X} destroyed"); ui.TryEnqueue(() => _bubbles.Close(h)); };
         _monitor.Log += m => DevLog.Write($"monitor: {m}");

@@ -17,6 +17,51 @@ string? Opt(string name) { int i = Array.IndexOf(args, name); return i >= 0 && i
 
 string RepoPath(params string[] parts) => Path.GetFullPath(Path.Combine([AppContext.BaseDirectory, "..", "..", "..", "..", "..", .. parts]));
 
+if (mode == "windows" && args.Length > 1)
+{
+    // Diagnostics: visible top-level windows of every process with this name (class, title, owner, ex-style).
+    var pids = Process.GetProcessesByName(args[1]).Select(p => p.Id).ToHashSet();
+    Diag.EnumWindows((h, _) =>
+    {
+        Diag.GetWindowThreadProcessId(h, out var pid);
+        if (pids.Contains((int)pid) && Diag.IsWindowVisible(h))
+        {
+            var cls = new StringBuilder(256); Diag.GetClassNameW(h, cls, 256);
+            var title = new StringBuilder(512); Diag.GetWindowTextW(h, title, 512);
+            Console.WriteLine($"0x{h:X} pid={pid} class='{cls}' title='{title}' owner=0x{Diag.GetWindow(h, 4):X} ex=0x{Diag.GetWindowLongW(h, -20):X}");
+        }
+        return true;
+    }, 0);
+    return 0;
+}
+
+if (mode == "uia" && args.Length > 1)
+{
+    // Diagnostics: dump the UIA subtree of a window (hex hwnd).
+    var reader = new Huh.Core.Dialogs.UiaReader();
+    var hwndArg = (nint)Convert.ToInt64(args[1], 16);
+    if (args.Contains("--find"))
+    {
+        var sw = Stopwatch.StartNew();
+        var found = reader.FindEmbeddedDialog(hwndArg, out var depth);
+        Console.WriteLine($"depth={depth}");
+        Console.WriteLine($"FindEmbeddedDialog: {(found is null ? "null" : $"'{Huh.Core.Interop.Native.Take(found.get_CurrentName())}' bounds={Huh.Core.Dialogs.UiaReader.Bounds(found)}")} in {sw.ElapsedMilliseconds} ms");
+        return 0;
+    }
+    var snap = reader.Read(hwndArg);
+    Console.WriteLine($"root='{snap.RootName}' isDialog={snap.IsDialog} error={snap.Error} nodes={snap.Nodes.Count}");
+    foreach (var n in snap.Nodes)
+        if (n.Name.Length > 0 || n.ControlType is "Window" or "Pane" or "Group")
+            Console.WriteLine($"  {n.ControlType,-12} '{(n.Name.Length > 90 ? n.Name[..90] + "…" : n.Name)}' cls={n.ClassName} id={n.AutomationId}");
+    return 0;
+}
+
+if (mode == "snap")
+{
+    return BubbleCheck.Snap(Opt("--out") ?? RepoPath("artifacts", "m3", "snap.png"),
+        int.Parse(Opt("--timeout") ?? "20000"), int.Parse(Opt("--settle") ?? "900"));
+}
+
 if (mode == "bubble")
 {
     return BubbleCheck.Run(
@@ -129,4 +174,16 @@ internal sealed class NintHexConverter : JsonConverter<nint>
 {
     public override nint Read(ref Utf8JsonReader r, Type t, JsonSerializerOptions o) => (nint)Convert.ToInt64(r.GetString(), 16);
     public override void Write(Utf8JsonWriter w, nint v, JsonSerializerOptions o) => w.WriteStringValue($"0x{v:X}");
+}
+
+internal static class Diag
+{
+    public delegate bool EnumProc(nint h, nint l);
+    [DllImport("user32.dll")] public static extern bool EnumWindows(EnumProc cb, nint l);
+    [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(nint h, out uint pid);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern int GetClassNameW(nint h, StringBuilder s, int n);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern int GetWindowTextW(nint h, StringBuilder s, int n);
+    [DllImport("user32.dll")] public static extern bool IsWindowVisible(nint h);
+    [DllImport("user32.dll")] public static extern nint GetWindow(nint h, uint cmd);
+    [DllImport("user32.dll")] public static extern int GetWindowLongW(nint h, int idx);
 }

@@ -74,6 +74,8 @@ internal static unsafe class Scenarios
             () => HardError(0xC0000135, "VCRUNTIME140_huh.dll"), ExpectedProcess: "csrss"),
         new("hard-error-bad-image", true, "System hard error STATUS_INVALID_IMAGE_FORMAT (0xc000007b)",
             () => HardError(0xC000007B, "C:\\Program Files\\Contoso\\plugin.dll"), ExpectedProcess: "csrss"),
+        new("browser-alert-scam", true, "Edge (throwaway profile) showing a fake 'Windows error' via JavaScript alert()",
+            BrowserAlert, ExpectedProcess: "msedge"),
         new("custom-window-error", true, "Custom (non-#32770) top-level window titled 'Error'",
             () => CustomWindow("Error", "Failed to save settings. The configuration file is read-only.")),
         new("mb-error-from-thread", true, "MessageBox raised from a background thread",
@@ -218,6 +220,22 @@ internal static unsafe class Scenarios
             };
             PInvoke.ShellExecuteEx(ref sei); // shows its own error UI (no SEE_MASK_FLAG_NO_UI)
         }
+    }
+
+    /// <summary>
+    /// A web page pretending to be a Windows error (tech-support-scam style). Uses a throwaway Edge profile in %TEMP% so the
+    /// user's own Edge session, tabs and profile are never touched.
+    /// </summary>
+    private static void BrowserAlert()
+    {
+        var edge = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86), @"Microsoft\Edge\Application\msedge.exe");
+        if (!File.Exists(edge)) throw new FileNotFoundException("Microsoft Edge not found", edge);
+        var profile = Path.Combine(Path.GetTempPath(), "huh-edge-profile");
+        // Fresh profile every run: a profile left over from a killed run shows a "Restore pages" bubble that blocks the alert.
+        try { if (Directory.Exists(profile)) Directory.Delete(profile, recursive: true); } catch (IOException) { }
+        const string page = "data:text/html,<title>Security Center</title><body style='font-family:sans-serif'>Loading...</body>"
+                          + "<script>setTimeout(()=>alert('Windows Security Error 0x80070005: Your PC is blocked. Call support now.'),800)</script>";
+        RunChild(edge, $"--user-data-dir=\"{profile}\" --no-first-run --no-default-browser-check --disable-sync --hide-crash-restore-bubble --disable-session-crashed-bubble --new-window \"{page}\"");
     }
 
     private static void RunChild(string exe, string args)

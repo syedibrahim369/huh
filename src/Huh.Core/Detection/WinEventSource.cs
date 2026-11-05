@@ -28,12 +28,12 @@ internal sealed unsafe class WinEventSource : IDisposable
 
     private static WinEventSource? s_current; // the static callback needs a way back to the instance
 
-    private readonly Action<nint, WinEventKind, int> _sink;
+    private readonly Action<nint, WinEventKind, int, int> _sink;
     private Thread? _thread;
     private uint _threadId;
     private readonly ManualResetEventSlim _started = new();
 
-    public WinEventSource(Action<nint, WinEventKind, int> sink) => _sink = sink;
+    public WinEventSource(Action<nint, WinEventKind, int, int> sink) => _sink = sink;
 
     public void Start()
     {
@@ -79,21 +79,21 @@ internal sealed unsafe class WinEventSource : IDisposable
             switch (ev)
             {
                 case EVENT_SYSTEM_DIALOGSTART:
-                    self._sink(hwnd, WinEventKind.DialogStart, 0);
+                    self._sink(hwnd, WinEventKind.DialogStart, idObject, idChild);
                     break;
                 case EVENT_SYSTEM_ALERT:
-                    self._sink(hwnd, WinEventKind.Alert, idChild);
+                    self._sink(hwnd, WinEventKind.Alert, idObject, idChild);
                     break;
                 case EVENT_OBJECT_SHOW or EVENT_OBJECT_HIDE or EVENT_OBJECT_DESTROY:
                     // Only whole top-level windows; ignore the flood of child-control/caret/cursor events.
                     if (idObject != 0 /* OBJID_WINDOW */ || idChild != 0 /* CHILDID_SELF */) return;
                     if (ev == EVENT_OBJECT_SHOW)
                     {
-                        if (Native.IsTopLevel(hwnd)) self._sink(hwnd, WinEventKind.Shown, 0);
+                        if (Native.IsTopLevel(hwnd)) self._sink(hwnd, WinEventKind.Shown, 0, 0);
                     }
                     else
                     {
-                        self._sink(hwnd, ev == EVENT_OBJECT_HIDE ? WinEventKind.Hidden : WinEventKind.Destroyed, 0);
+                        self._sink(hwnd, ev == EVENT_OBJECT_HIDE ? WinEventKind.Hidden : WinEventKind.Destroyed, 0, 0);
                     }
                     break;
             }

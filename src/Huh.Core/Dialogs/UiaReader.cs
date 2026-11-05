@@ -80,6 +80,83 @@ internal sealed class UiaReader
         }
     }
 
+    /// <summary>
+    /// Finds a dialog drawn INSIDE a top-level window (no HWND of its own): Chromium tab-modal JS dialogs
+    /// (JavaScriptTabModalDialogViewViews) or any element that declares IsDialog (Firefox prompts, XAML ContentDialogs).
+    /// Uses a property condition so UIA can stop at the first match instead of us reading the whole web page.
+    /// Returns the dialog's root (the element whose subtree has title, text and buttons).
+    /// </summary>
+    public IUIAutomationElement? FindEmbeddedDialog(nint topLevel) => FindEmbeddedDialog(topLevel, out _);
+
+    /// <summary>
+    /// Breadth-first search of the host window's OWN UI (browser frame, toolbars, dialogs), never descending into web content
+    /// (Document elements / Chrome_RenderWidgetHostHWND): a full-page UIA search can take seconds on big pages.
+    /// Matches Chromium's tab-modal JS dialog view, or any Window/Pane that declares IsDialog.
+    /// </summary>
+    public IUIAutomationElement? FindEmbeddedDialog(nint topLevel, out int depth)
+    {
+        depth = -1;
+        const int MaxDepth = 6, MaxNodes = 600;
+        try
+        {
+            var root = Automation.ElementFromHandle((HWND)topLevel);
+            var level = new List<IUIAutomationElement> { root };
+            int visited = 0;
+            for (int d = 1; d <= MaxDepth && level.Count > 0 && visited < MaxNodes; d++)
+            {
+                var next = new List<IUIAutomationElement>();
+                foreach (var parent in level)
+                {
+                    var kids = parent.FindAllBuildCache(TreeScope.TreeScope_Children, _all, _cache);
+                    int n = kids.get_Length();
+                    for (int i = 0; i < n && visited < MaxNodes; i++, visited++)
+                    {
+                        var k = kids.GetElement(i);
+                        string cls = Native.Take(k.get_CachedClassName());
+                        var type = k.get_CachedControlType();
+                        if (cls == "JavaScriptTabModalDialogViewViews" || (type is UIA_CONTROLTYPE_ID.UIA_WindowControlTypeId or UIA_CONTROLTYPE_ID.UIA_PaneControlTypeId && ReadBool(k, UIA_PROPERTY_ID.UIA_IsDialogPropertyId) == true))
+                        {
+                            depth = d;
+                            return DialogRoot(k, topLevel);
+                        }
+                        // Never walk into web content: that's the page's DOM, potentially thousands of nodes.
+                        if (type == UIA_CONTROLTYPE_ID.UIA_DocumentControlTypeId || cls is "Chrome_RenderWidgetHostHWND" or "MozillaWindowClass") continue;
+                        next.Add(k);
+                    }
+                }
+                level = next;
+            }
+            return null;
+        }
+        catch (COMException) { return null; }
+    }
+
+    /// <summary>Chromium: JavaScriptTabModalDialogViewViews -> DialogClientView -> RootView (Window with the "x says" title).</summary>
+    private IUIAutomationElement DialogRoot(IUIAutomationElement hit, nint topLevel)
+    {
+        var walker = Automation.get_ControlViewWalker();
+        var e = hit;
+        for (int i = 0; i < 3; i++)
+        {
+            if (e.get_CurrentControlType() == UIA_CONTROLTYPE_ID.UIA_WindowControlTypeId) return e;
+            var parent = walker.GetParentElement(e);
+            if (parent is null || (nint)parent.get_CurrentNativeWindowHandle() == topLevel) break;
+            e = parent;
+        }
+        return hit;
+    }
+
+    /// <summary>Screen rectangle of an element in physical pixels, or null if it's gone / has no area.</summary>
+    public static Placement.PxRect? Bounds(IUIAutomationElement e)
+    {
+        try
+        {
+            var r = e.get_CurrentBoundingRectangle();
+            return r.right > r.left && r.bottom > r.top ? new Placement.PxRect(r.left, r.top, r.right, r.bottom) : null;
+        }
+        catch (COMException) { return null; }
+    }
+
     /// <summary>Strips invisible bidi/format marks (Explorer sprinkles U+200E into dates and sizes) and trims.</summary>
     internal static string CleanText(string s)
     {

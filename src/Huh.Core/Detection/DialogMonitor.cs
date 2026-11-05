@@ -55,6 +55,13 @@ public sealed class DialogMonitor : IDisposable
     private readonly Dictionary<nint, long> _seenWindows = [];
     private readonly Dictionary<string, long> _seenSignatures = [];
     private readonly HashSet<nint> _tracked = [];
+    /// <summary>Open dialogs drawn inside a host window (browser tab-modal alerts), keyed by host top-level HWND.</summary>
+    private readonly Dictionary<nint, IUIAutomationElement> _embedded = [];
+    private long _lastEmbeddedPoll;
+    private readonly Dictionary<nint, long> _embeddedSearches = [];
+
+    private static readonly HashSet<string> BrowserProcesses = new(StringComparer.OrdinalIgnoreCase)
+        { "msedge", "chrome", "firefox", "brave", "opera", "vivaldi", "arc" };
 
     public DialogMonitor(DialogMonitorOptions? options = null) => _options = options ?? new();
 
@@ -69,7 +76,7 @@ public sealed class DialogMonitor : IDisposable
         _ready.Wait();
         if (_startError is not null) throw new InvalidOperationException("UI Automation failed to start.", _startError);
 
-        _winEvents = new WinEventSource((hwnd, kind, detail) =>
+        _winEvents = new WinEventSource((hwnd, kind, idObject, idChild) =>
         {
             long now = Stopwatch.GetTimestamp();
             if (kind == WinEventKind.Hidden) return; // hidden != closed (owner minimized); bubbles follow show/hide themselves
@@ -102,16 +109,23 @@ public sealed class DialogMonitor : IDisposable
         }
         _ready.Set();
 
-        foreach (var work in _queue.GetConsumingEnumerable())
+        while (!_queue.IsCompleted)
         {
+            // Wake up periodically while embedded dialogs are open: they have no window to be destroyed, so we poll them.
+            bool got;
+            Work? work = null;
+            try { got = _queue.TryTake(out work, _embedded.Count > 0 ? 400 : Timeout.Infinite); }
+            catch (InvalidOperationException) { break; } // completed
             try
             {
-                switch (work)
+                switch (got ? work : null)
                 {
                     case WindowWork w: HandleWindow(reader, w); break;
                     case ElementWork e: HandleElement(reader, e); break;
                     case ClosedWork c: HandleClosed(c); break;
+                    case EmbeddedFoundWork ef: HandleEmbeddedFound(ef); break;
                 }
+                if (_embedded.Count > 0) PollEmbedded();
             }
             catch (Exception ex)
             {
@@ -160,6 +174,15 @@ public sealed class DialogMonitor : IDisposable
         if (!PInvoke.IsWindow(hwnd)) return;
         int pid = Native.ProcessId(hwnd);
         if (IsExcluded(pid)) return;
+
+        // Browsers draw JS alerts INSIDE the browser window (no HWND of their own) and announce them with EVENT_SYSTEM_ALERT
+        // from a child window (Chrome_RenderWidgetHostHWND). Look for the dialog element in the browser's top-level window.
+        if (w.Kind is WinEventKind.Alert or WinEventKind.DialogStart && IsBrowser(pid))
+        {
+            HandleEmbedded((nint)PInvoke.GetAncestor(hwnd, Windows.Win32.UI.WindowsAndMessaging.GET_ANCESTOR_FLAGS.GA_ROOT), pid, w.Timestamp);
+            return;
+        }
+
         if (Recently(_seenWindows, w.Hwnd, w.Timestamp)) return;
 
         // Cheap pre-filter so we only spend a UIA round trip on plausible dialogs.
@@ -193,6 +216,91 @@ public sealed class DialogMonitor : IDisposable
         Emit(w.Hwnd, cls, title.Length > 0 ? title : snap.RootName, snap, icon, proc, w.Source, w.Timestamp);
     }
 
+    private static bool IsBrowser(int pid)
+    {
+        try { using var p = Process.GetProcessById(pid); return BrowserProcesses.Contains(p.ProcessName); }
+        catch { return false; }
+    }
+
+    // ------------------------------------------------------------------ embedded (in-window) dialogs, e.g. browser alerts
+    // Searching a browser's UIA tree can be slow (accessibility switch-on, big windows), so it runs on its own MTA thread and
+    // hands results back to the main worker. Ordinary dialogs never wait behind it.
+
+    private sealed record EmbeddedRequest(nint Top, int Pid, long Timestamp);
+    private sealed record EmbeddedFoundWork(nint Top, int Pid, IUIAutomationElement Dialog, UiaSnapshot Snap,
+        Placement.PxRect Bounds, Placement.PxRect HostFrame, long Timestamp) : Work(Timestamp);
+
+    private readonly BlockingCollection<EmbeddedRequest> _embeddedQueue = new();
+    private Thread? _embeddedWorker;
+
+    /// <summary>Main worker: decide whether to search this browser window (rate-limited), then queue the search.</summary>
+    private void HandleEmbedded(nint top, int pid, long t0)
+    {
+        if (top == 0 || _embedded.ContainsKey(top)) return;
+        // Pages with ARIA live regions (chat apps...) fire ALERT events often: search each browser window at most every 2 s.
+        if (_embeddedSearches.TryGetValue(top, out var last) && Stopwatch.GetElapsedTime(last).TotalSeconds < 2) return;
+        _embeddedSearches[top] = Stopwatch.GetTimestamp();
+        if (_embeddedWorker is null)
+        {
+            _embeddedWorker = new Thread(EmbeddedWorkerMain) { IsBackground = true, Name = "huh-embedded-search" };
+            _embeddedWorker.SetApartmentState(ApartmentState.MTA);
+            _embeddedWorker.Start();
+        }
+        _embeddedQueue.Add(new EmbeddedRequest(top, pid, t0));
+    }
+
+    private void EmbeddedWorkerMain()
+    {
+        UiaReader reader;
+        try { reader = new UiaReader(); }
+        catch (Exception ex) { Log?.Invoke($"embedded worker: {ex.GetType().Name}"); return; }
+
+        foreach (var req in _embeddedQueue.GetConsumingEnumerable())
+        {
+            try
+            {
+                SleepUntil(req.Timestamp + ToTicks(_options.SettleDelay));
+                // The dialog view appears after the ALERT event, and the first UIA query switches on Chromium's accessibility
+                // tree (built asynchronously): keep looking for ~2 s. Each search is shallow (no web content), ~50-100 ms.
+                IUIAutomationElement? dialog = null;
+                for (int i = 0; i < 8 && dialog is null && PInvoke.IsWindow((HWND)req.Top); i++)
+                {
+                    dialog = reader.FindEmbeddedDialog(req.Top);
+                    if (dialog is null) Thread.Sleep(200);
+                }
+                if (dialog is null) continue;
+                var bounds = UiaReader.Bounds(dialog);
+                var host = Windowing.Screen.FrameBounds(req.Top);
+                if (bounds is null || host is null) continue;
+                var snap = reader.Read(dialog);
+                _queue.Add(new EmbeddedFoundWork(req.Top, req.Pid, dialog, snap, bounds.Value, host.Value, req.Timestamp));
+            }
+            catch (Exception ex) { Log?.Invoke($"embedded worker: {ex.GetType().Name} 0x{ex.HResult:X8}"); }
+        }
+    }
+
+    private void HandleEmbeddedFound(EmbeddedFoundWork f)
+    {
+        if (_embedded.ContainsKey(f.Top) || IsExcluded(f.Pid)) return;
+        _embedded[f.Top] = f.Dialog;
+        Emit(f.Top, Native.ClassName((HWND)f.Top), f.Snap.RootName, f.Snap, DialogSeverity.None, ProcessInfo.Get(f.Pid),
+             DetectionSource.UiAutomation, f.Timestamp, embeddedBounds: f.Bounds, hostFrame: f.HostFrame);
+    }
+
+    private void PollEmbedded()
+    {
+        if (Stopwatch.GetElapsedTime(_lastEmbeddedPoll).TotalMilliseconds < 350) return;
+        _lastEmbeddedPoll = Stopwatch.GetTimestamp();
+        foreach (var (top, el) in _embedded.ToList())
+        {
+            bool gone = !PInvoke.IsWindow((HWND)top) || UiaReader.Bounds(el) is null;
+            if (!gone) continue;
+            _embedded.Remove(top);
+            _seenSignatures.Clear(); // the same alert text may legitimately come back right away
+            if (_tracked.Remove(top)) DialogClosed?.Invoke(top);
+        }
+    }
+
     private void HandleElement(UiaReader reader, ElementWork e)
     {
         if (IsExcluded(e.Pid)) return;
@@ -202,7 +310,8 @@ public sealed class DialogMonitor : IDisposable
         Emit(0, "", snap.RootName, snap, DialogSeverity.None, ProcessInfo.Get(e.Pid), DetectionSource.UiAutomation, e.Timestamp);
     }
 
-    private void Emit(nint hwnd, string cls, string title, UiaSnapshot snap, DialogSeverity icon, ProcessDetails proc, DetectionSource source, long t0)
+    private void Emit(nint hwnd, string cls, string title, UiaSnapshot snap, DialogSeverity icon, ProcessDetails proc, DetectionSource source, long t0,
+        Placement.PxRect? embeddedBounds = null, Placement.PxRect? hostFrame = null)
     {
         bool blocked = snap.Nodes.Count == 0 && proc.Elevation is ElevationState.Elevated or ElevationState.AccessDenied;
         var c = DialogClassifier.Classify(new DialogEvidence(cls, title, snap.Nodes, snap.IsDialog, icon));
@@ -230,6 +339,8 @@ public sealed class DialogMonitor : IDisposable
             BlockedByUipi = blocked,
             Source = source,
             LatencyMs = Stopwatch.GetElapsedTime(t0).TotalMilliseconds,
+            EmbeddedBounds = embeddedBounds,
+            HostFrameAtDetection = hostFrame,
         };
         if (hwnd != 0) _tracked.Add(hwnd);
         DialogDetected?.Invoke(info);
@@ -260,6 +371,8 @@ public sealed class DialogMonitor : IDisposable
     public void Dispose()
     {
         _winEvents?.Dispose();
+        _embeddedQueue.CompleteAdding();
+        _embeddedWorker?.Join(TimeSpan.FromSeconds(3));
         _queue.CompleteAdding();
         _worker?.Join(TimeSpan.FromSeconds(3));
     }

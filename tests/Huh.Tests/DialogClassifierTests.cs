@@ -36,6 +36,26 @@ public class DialogClassifierTests
         Assert.Equal(DialogSeverity.Question, c.Severity);
     }
 
+    // Real-world miss (Notepad -> Save As -> C:\): a TaskDialog (no icon signal) whose error ends in a question.
+    [Fact]
+    public void Permission_error_with_trailing_question_is_an_error()
+    {
+        var c = Classify("Save as", nodes:
+        [
+            new UiaNode("Text", "C:\\huh-demo.txt\nYou don't have permission to save in this location.\nContact the administrator to obtain permission.\n\nWould you like to save in the Documents folder instead?", "Element", "ContentText"),
+            new UiaNode("Button", "Yes", "CCPushButton", "CommandButton_6"),
+            new UiaNode("Button", "No", "CCPushButton", "CommandButton_7"),
+        ]);
+        Assert.Equal(DialogSeverity.Error, c.Severity);
+    }
+
+    [Theory]
+    [InlineData("You do not have the required permissions to open this file.")]
+    [InlineData("Permission denied")]
+    [InlineData("This app is not allowed to run on this PC.")]
+    public void Permission_phrasings_are_errors(string message) =>
+        Assert.Equal(DialogSeverity.Error, Classify("App", nodes: [Text(message)]).Severity);
+
     [Fact]
     public void Error_words_beat_question_phrasing()
     {

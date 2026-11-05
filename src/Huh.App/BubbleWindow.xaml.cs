@@ -1,9 +1,14 @@
-using System.Diagnostics;
+using Huh.Core.Decoding;
 using Huh.Core.Dialogs;
+using Huh.Core.Facts;
 using Huh.Core.Placement;
+using Huh.Core.Provenance;
 using Huh.Core.Windowing;
+using Microsoft.UI.Text;
 using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
+using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Documents;
 using Microsoft.UI.Xaml.Media;
 using Windows.Foundation;
 using WinRT.Interop;
@@ -13,23 +18,32 @@ namespace Huh;
 /// <summary>
 /// The bubble: a borderless, never-activated window anchored next to one dialog.
 /// Positioning is done in physical pixels by <see cref="BubblePlacer"/>; the XAML content is laid out in DIPs.
+/// Content (M3) is fully deterministic: headline, decoded codes, source + trust badge, expandable details.
 /// </summary>
 public sealed partial class BubbleWindow : Window
 {
     public const double WidthDip = 340;
 
     public nint Hwnd { get; }
-    internal DialogInfo Dialog { get; }
+    internal DialogInfo Dialog => Facts.Dialog;
+    internal DialogFacts Facts { get; }
     public event Action<BubbleWindow>? Dismissed;
 
     private readonly WindowFollower _follower;
+    private readonly Microsoft.UI.Dispatching.DispatcherQueueTimer _restack;
     private bool _hidden;
     private double _lastHeightDip;
     private uint _lastDpi;
+    internal PxRect LastAnchor { get; private set; }
 
-    public BubbleWindow(DialogInfo dialog)
+    // Segoe Fluent Icons code points (built from ints so no escaping can get mangled).
+    private const int GlyphErrorFull = 0xEB90, GlyphWarningFull = 0xE814, GlyphLock = 0xE72E, GlyphCheck = 0xE73E,
+        GlyphWarning = 0xE7BA, GlyphError = 0xE783, GlyphUnknown = 0xE9CE, GlyphStore = 0xE719, GlyphWindows = 0xE770,
+        GlyphGlobe = 0xE774, GlyphChevronDown = 0xE70D, GlyphChevronUp = 0xE70E;
+
+    internal BubbleWindow(DialogFacts facts)
     {
-        Dialog = dialog;
+        Facts = facts;
         InitializeComponent();
         Hwnd = WindowNative.GetWindowHandle(this);
 
@@ -42,11 +56,12 @@ public sealed partial class BubbleWindow : Window
         AppWindow.IsShownInSwitchers = false;
         Screen.MakeBubbleWindow(Hwnd); // after SetPresenter: presenters reset window styles
 
-        // Dev-only override so both themes can be checked without changing the user's Windows setting.
+        // Dev-only overrides: check both themes / the expanded layout without changing anything on the user's machine.
         if (Environment.GetEnvironmentVariable("HUH_THEME") is { } theme && Enum.TryParse<ElementTheme>(theme, true, out var t))
             Root.RequestedTheme = t;
         SystemBackdrop = new AlwaysActiveAcrylic();
-        Bind(dialog);
+        Bind(facts);
+        if (Environment.GetEnvironmentVariable("HUH_EXPAND_DETAILS") == "1") SetDetailsExpanded(true);
 
         // Created before anything that can call Reposition() (which may start it).
         _restack = DispatcherQueue.CreateTimer();
@@ -59,7 +74,7 @@ public sealed partial class BubbleWindow : Window
             if (Math.Abs(e.NewSize.Height - _lastHeightDip) > 0.5) Reposition();
         };
 
-        _follower = new WindowFollower(dialog.Hwnd);
+        _follower = new WindowFollower(Dialog.Hwnd);
         _follower.Moved += () => { if (!_hidden) Reposition(); };
         // EVENT_SYSTEM_FOREGROUND can arrive before the new foreground window has actually been raised, so re-stack now
         // and again once the z-order has settled.
@@ -70,13 +85,12 @@ public sealed partial class BubbleWindow : Window
         _follower.Shown += ShowWithDialog;
     }
 
-    private readonly Microsoft.UI.Dispatching.DispatcherQueueTimer _restack;
+    // ------------------------------------------------------------------ placement / lifecycle
 
     private void HideWithDialog() { DevLog.Write($"bubble 0x{Hwnd:X}: hide with dialog 0x{Dialog.Hwnd:X}"); _hidden = true; Screen.Hide(Hwnd); }
 
     private void ShowWithDialog()
     {
-        DevLog.Write($"bubble 0x{Hwnd:X}: show-with-dialog request (visible={Screen.IsVisible(Dialog.Hwnd)} min={Screen.IsMinimized(Dialog.Hwnd)})");
         if (!Screen.IsVisible(Dialog.Hwnd) || Screen.IsMinimized(Dialog.Hwnd)) return;
         _hidden = false;
         Reposition();
@@ -89,6 +103,7 @@ public sealed partial class BubbleWindow : Window
     {
         DevLog.Write($"bubble 0x{Hwnd:X}: show beside dialog 0x{Dialog.Hwnd:X} ({Dialog.Process.Name})");
         if (!Reposition()) return false;
+        DevLog.Write($"bubble 0x{Hwnd:X}: anchor={LastAnchor.Left},{LastAnchor.Top},{LastAnchor.Right},{LastAnchor.Bottom}");
         Screen.ShowNoActivate(Hwnd);
         return true;
     }
@@ -98,7 +113,10 @@ public sealed partial class BubbleWindow : Window
         var frame = Screen.IsVisible(Dialog.Hwnd) ? Screen.FrameBounds(Dialog.Hwnd) : null;
         if (frame is null) return false;
         _lastHeightDip = MeasureHeightDip();
-        var placement = BubblePlacer.Place(frame.Value, WidthDip, _lastHeightDip, Screen.GetMonitors());
+        // Embedded dialogs (browser alerts) are anchored to their own rectangle inside the host window, not the whole window.
+        var anchor = Dialog.AnchorFor(frame.Value);
+        LastAnchor = anchor;
+        var placement = BubblePlacer.Place(anchor, WidthDip, _lastHeightDip, Screen.GetMonitors());
         Screen.PlaceAbove(Hwnd, Dialog.Hwnd, placement.Rect);
         // Crossing onto a monitor with another scale triggers WM_DPICHANGED, and WinUI then applies Windows' suggested size.
         // Place once more after that settles so our (placer-computed) size wins. Not testable on the single-monitor dev box.
@@ -114,39 +132,184 @@ public sealed partial class BubbleWindow : Window
         return h > 1 ? Math.Ceiling(h) + 2 /* 1px border top+bottom */ : 160; // before first layout: a sane estimate
     }
 
-    private void Bind(DialogInfo d)
+    // ------------------------------------------------------------------ content
+
+    private void Bind(DialogFacts f)
     {
-        string app = FriendlyName(d.Process);
+        var d = f.Dialog;
+        var src = f.Source;
+
         if (d.BlockedByUipi)
         {
-            SeverityIcon.Glyph = ""; // Lock
-            SeverityIcon.Foreground = Brush("SystemFillColorCautionBrush");
-            Headline.Text = $"{app} is running as administrator";
-            Detail.Text = "Windows doesn't let huh read dialogs from admin apps unless huh runs as admin too, and huh doesn't by default. "
-                        + (d.Title.Length > 0 ? $"The dialog is titled “{d.Title}”." : "");
+            SetIcon(SeverityIcon, GlyphLock, "SystemFillColorCautionBrush");
+            Headline.Text = $"{src.DisplayName} is running as administrator";
+            ShowExcerpt("Windows doesn't let huh read dialogs from admin apps unless huh also runs as admin (it doesn't, by default)."
+                        + (d.Title.Length > 0 ? $" The dialog is titled “{d.Title}”." : ""));
         }
         else
         {
             bool warning = d.Severity == DialogSeverity.Warning;
-            SeverityIcon.Glyph = warning ? "" : ""; // StatusWarningFull : StatusErrorFull
-            SeverityIcon.Foreground = Brush(warning ? "SystemFillColorCautionBrush" : "SystemFillColorCriticalBrush");
-            Headline.Text = d.Title.Length > 0 ? d.Title : $"{app} reported an error";
-            Detail.Text = d.Message;
-            Detail.Visibility = d.Message.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
+            SetIcon(SeverityIcon, warning ? GlyphWarningFull : GlyphErrorFull, warning ? "SystemFillColorCautionBrush" : "SystemFillColorCriticalBrush");
+            Headline.Text = f.Headline;
+
+            foreach (var code in f.Codes.Take(2)) CodesPanel.Children.Add(CodeRow(code, d.Message));
+            if (f.Codes.Count == 0) ShowExcerpt(RestOfMessage(d.Message, f.Headline));
         }
-        SourceName.Text = $"From {app}" + (d.Process.Name is { } n ? $" ({n}.exe)" : "");
-        SourcePath.Text = d.Process.Path ?? "Path unavailable (protected or elevated process)";
-        Microsoft.UI.Xaml.Controls.ToolTipService.SetToolTip(SourcePath, SourcePath.Text);
+
+        BindSource(src);
+        BuildDetails(f);
     }
 
-    private static string FriendlyName(ProcessDetails p)
+    private void ShowExcerpt(string? text)
     {
-        try
+        if (string.IsNullOrWhiteSpace(text)) return;
+        Excerpt.Text = text;
+        Excerpt.Visibility = Visibility.Visible;
+    }
+
+    /// <summary>Dialog text after the headline sentence (so the excerpt adds information instead of repeating it).</summary>
+    private static string? RestOfMessage(string message, string headline)
+    {
+        var m = message.Trim();
+        int i = m.IndexOf(headline, StringComparison.Ordinal);
+        var rest = i >= 0 ? m[(i + headline.Length)..].TrimStart('.', ' ', '\r', '\n') : m;
+        rest = string.Join(' ', rest.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
+        return rest.Length > 0 ? rest : null;
+    }
+
+    /// <summary>One code: a monospace chip ("0x80070005") + name and Windows' own explanation.</summary>
+    private static UIElement CodeRow(DecodedCode c, string dialogMessage)
+    {
+        var grid = new Grid { ColumnSpacing = 8 };
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+
+        var chip = new Border
         {
-            if (p.Path is not null && FileVersionInfo.GetVersionInfo(p.Path).FileDescription is { Length: > 0 } desc) return desc;
+            Background = Brush("SubtleFillColorSecondaryBrush"),
+            BorderBrush = Brush("ControlStrokeColorDefaultBrush"),
+            BorderThickness = new Thickness(1),
+            CornerRadius = new CornerRadius(4),
+            Padding = new Thickness(5, 1, 5, 2),
+            VerticalAlignment = VerticalAlignment.Top,
+            Child = new TextBlock { Text = c.Display, FontFamily = new FontFamily("Cascadia Mono, Consolas"), FontSize = 12 },
+        };
+        grid.Children.Add(chip);
+
+        var text = new TextBlock { TextWrapping = TextWrapping.Wrap, MaxLines = 3, TextTrimming = TextTrimming.CharacterEllipsis, FontSize = 12 };
+        Grid.SetColumn(text, 1);
+        string label = c.Name ?? c.KindLabel;
+        text.Inlines.Add(new Run { Text = label, FontWeight = FontWeights.SemiBold });
+        // Don't repeat what the dialog already says word-for-word; then the kind label is the useful part.
+        if (c.Message is { } msg && !FactsBuilder.AlreadySays(dialogMessage, msg))
+            text.Inlines.Add(new Run { Text = "\n" + msg, Foreground = Brush("TextFillColorSecondaryBrush") });
+        else if (c.Name is not null)
+            text.Inlines.Add(new Run { Text = "\n" + c.KindLabel, Foreground = Brush("TextFillColorSecondaryBrush") });
+        grid.Children.Add(text);
+        return grid;
+    }
+
+    private void BindSource(SourceInfo s)
+    {
+        SourceName.Text = s.Kind switch
+        {
+            SourceKind.Windows => "Windows" + (s.OnBehalfOf is { } exe ? $" · about {exe}" : ""),
+            SourceKind.WebPage => s.WebOrigin ?? "A web page",
+            _ => s.DisplayName + (s.ExeName is { } e && !s.DisplayName.Equals(Path.GetFileNameWithoutExtension(e), StringComparison.OrdinalIgnoreCase) ? $" ({e})" : ""),
+        };
+        ToolTipService.SetToolTip(SourceName, s.Path ?? s.DisplayName);
+
+        (int glyph, string brush, string text) = s.Kind switch
+        {
+            SourceKind.WebPage => (GlyphGlobe, "SystemFillColorCautionBrush",
+                $"From a web page in {s.Browser}. This is not a Windows message."),
+            SourceKind.Windows => (GlyphWindows, "SystemFillColorSuccessBrush",
+                s.OnBehalfOf is { } exe ? $"Raised by Windows itself ({s.ExeName}) because {exe} couldn't start properly"
+                                        : $"Raised by Windows itself ({s.ExeName})"),
+            SourceKind.StoreApp => (GlyphStore, "SystemFillColorSuccessBrush", $"Microsoft Store app by {s.Publisher ?? "unknown publisher"}"),
+            _ => s.Signature.State switch
+            {
+                SignatureState.Signed => (GlyphCheck, "SystemFillColorSuccessBrush", $"Signed by {s.Signature.Signer}"),
+                SignatureState.Unsigned => (GlyphWarning, "SystemFillColorCautionBrush",
+                    "Unsigned: the publisher can't be verified" + (s.Publisher is { } p ? $" (claims to be {p})" : "")),
+                SignatureState.Invalid => (GlyphError, "SystemFillColorCriticalBrush", $"Invalid signature: {s.Signature.Detail}"),
+                _ => (GlyphUnknown, "TextFillColorTertiaryBrush", "Signature couldn't be checked"),
+            },
+        };
+        SetIcon(BadgeIcon, glyph, brush);
+        BadgeText.Text = text;
+        BadgeText.Foreground = Brush(s.Kind == SourceKind.WebPage || s.Signature.State is SignatureState.Unsigned or SignatureState.Invalid
+            ? brush : "TextFillColorSecondaryBrush");
+    }
+
+    // ------------------------------------------------------------------ details
+
+    private void BuildDetails(DialogFacts f)
+    {
+        var d = f.Dialog;
+        var s = f.Source;
+        Section("Dialog");
+        Line("Title", d.Title.Length > 0 ? d.Title : "(none)");
+        Line("Message", d.Message.Length > 0 ? d.Message : "(none)");
+        if (d.Buttons.Count > 0) Line("Buttons", string.Join(", ", d.Buttons));
+
+        if (f.Codes.Count > 0)
+        {
+            Section("Error codes");
+            foreach (var c in f.Codes)
+                Line(c.Display, $"{c.KindLabel}{(c.Name is { } n ? " · " + n : "")}\n{c.Message ?? "Windows has no description for this code."}");
         }
-        catch { /* no version info */ }
-        return p.Name ?? "An app";
+
+        Section("Source");
+        Line("Program", s.DisplayName + (s.ExeName is { } e ? $" ({e})" : ""));
+        if (s.OnBehalfOf is not null) Line("About", s.OnBehalfOf);
+        if (s.Kind == SourceKind.WebPage) Line("Web page", $"{s.WebOrigin ?? "unknown origin"} in {s.Browser}");
+        Line("Publisher", s.Publisher is null ? "unknown" : s.Publisher + (s.PublisherVerified ? " (verified)" : " (unverified: from the file's version info)"));
+        Line("Signature", s.Signature.State switch
+        {
+            SignatureState.Signed => $"Valid, signed by {s.Signature.Signer}" + (s.Signature.ViaCatalog ? " (Windows catalog)" : s.Signature.Detail is { } det ? $" ({det})" : " (embedded)"),
+            SignatureState.Unsigned => "None",
+            SignatureState.Invalid => $"Invalid: {s.Signature.Detail}",
+            _ => $"Not checked: {s.Signature.Detail}",
+        });
+        Line("Path", s.Path ?? "unavailable");
+        Line("Process", $"PID {d.Process.Pid}, {d.Process.Elevation switch { ElevationState.Elevated => "running as administrator", ElevationState.NotElevated => "not elevated", _ => "elevation unknown" }}");
+        Line("Window", $"{d.Kind}, class {d.ClassName}");
+    }
+
+    private void Section(string title)
+    {
+        var p = new Paragraph { Margin = new Thickness(0, DetailsText.Blocks.Count == 0 ? 0 : 8, 0, 2) };
+        p.Inlines.Add(new Run { Text = title.ToUpperInvariant(), FontWeight = FontWeights.SemiBold, FontSize = 11, Foreground = Brush("TextFillColorTertiaryBrush") });
+        DetailsText.Blocks.Add(p);
+    }
+
+    private void Line(string label, string value)
+    {
+        var p = new Paragraph { Margin = new Thickness(0, 0, 0, 2) };
+        p.Inlines.Add(new Run { Text = label + ": ", FontWeight = FontWeights.SemiBold });
+        p.Inlines.Add(new Run { Text = value, Foreground = Brush("TextFillColorSecondaryBrush") });
+        DetailsText.Blocks.Add(p);
+    }
+
+    private void OnToggleDetails(object sender, RoutedEventArgs e) => SetDetailsExpanded(DetailsPanel.Visibility != Visibility.Visible);
+
+    private void SetDetailsExpanded(bool expanded)
+    {
+        DetailsPanel.Visibility = expanded ? Visibility.Visible : Visibility.Collapsed;
+        DetailsToggleText.Text = expanded ? "Hide details" : "Show details";
+        DetailsChevron.Glyph = G(expanded ? GlyphChevronUp : GlyphChevronDown);
+        // Height changes -> Root.SizeChanged -> Reposition() (may flip sides if it no longer fits).
+    }
+
+    // ------------------------------------------------------------------ helpers
+
+    private static string G(int codePoint) => char.ConvertFromUtf32(codePoint);
+
+    private static void SetIcon(FontIcon icon, int glyph, string brushKey)
+    {
+        icon.Glyph = G(glyph);
+        icon.Foreground = Brush(brushKey);
     }
 
     private static Brush Brush(string key) => (Brush)Application.Current.Resources[key];

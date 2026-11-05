@@ -47,6 +47,22 @@ public sealed record DialogInfo
     /// <summary>Milliseconds from the first window event to a fully read + classified dialog.</summary>
     public double LatencyMs { get; init; }
 
+    /// <summary>
+    /// For dialogs drawn inside another window (browser tab-modal alerts): the dialog's own rectangle at detection time.
+    /// <see cref="Hwnd"/> is then the HOST top-level window (what the bubble follows), and <see cref="HostFrameAtDetection"/>
+    /// lets the bubble translate the rectangle when the host moves.
+    /// </summary>
+    public Placement.PxRect? EmbeddedBounds { get; init; }
+    public Placement.PxRect? HostFrameAtDetection { get; init; }
+    public bool IsEmbedded => EmbeddedBounds is not null;
+
+    /// <summary>Where the dialog is now, given the host window's current frame.</summary>
+    public Placement.PxRect AnchorFor(Placement.PxRect hostFrameNow) =>
+        EmbeddedBounds is { } eb && HostFrameAtDetection is { } h0
+            ? new Placement.PxRect(eb.Left + hostFrameNow.Left - h0.Left, eb.Top + hostFrameNow.Top - h0.Top,
+                                   eb.Right + hostFrameNow.Left - h0.Left, eb.Bottom + hostFrameNow.Top - h0.Top)
+            : hostFrameNow;
+
     /// <summary>The dialogs huh acts on: errors and warnings.</summary>
     public bool IsError => Severity is DialogSeverity.Error or DialogSeverity.Warning;
 }
