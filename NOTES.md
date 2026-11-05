@@ -74,7 +74,7 @@ tests/Huh.Tests      xUnit v3 (Microsoft.Testing.Platform runner)
 
 ## Milestones
 - [x] M0 Setup
-- [x] M1 Detection (UIPI path implemented; needs an elevated-harness run to verify, see below)
+- [x] M1 Detection (incl. UIPI path, verified with an elevated harness)
 - [ ] M2 Bubble
 - [ ] M3 Deterministic decoding
 - [ ] M4 AI explanation (opt-in)
@@ -82,8 +82,13 @@ tests/Huh.Tests      xUnit v3 (Microsoft.Testing.Platform runner)
 - [ ] M6 Polish
 
 ## Left / ideas
-- Verify the UIPI path: an elevated harness dialog should come through as `BlockedByUipi=true` (needs a UAC click).
 - Localized dialogs: text cues are English-only. MessageBoxes are covered by the icon signal; TaskDialogs are not.
 - Chromium/Edge in-page `alert()` and XAML ContentDialogs: UIA element path exists (IsDialog) but is not in the harness yet.
 - Harness/probe: `dotnet build` both, then `tools/Huh.Probe/bin/Debug/net10.0-windows/Huh.Probe.exe score` (`--verbose` dumps UIA trees).
 - Check Gemini free-tier RPM/RPD on https://aistudio.google.com/rate-limit (login required).
+
+## UIPI (verified 2026-11-06)
+Elevated harness (`Start-Process -Verb RunAs`) + non-elevated probe: the dialog IS detected (WinEvents cross integrity levels),
+caption and UIA `IsDialog` are readable, but the UIA subtree is empty and `STM_GETICON` is blocked.
+`OpenProcessToken` still works on a same-user elevated process, so we see `Elevation=Elevated` and set `BlockedByUipi=true`.
+Retries are skipped for elevated/AccessDenied targets (they'd only add ~1.5 s). huh can't close or click such dialogs either.

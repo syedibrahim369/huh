@@ -176,9 +176,12 @@ public sealed class DialogMonitor : IDisposable
 
         _seenWindows[w.Hwnd] = w.Timestamp;
         string title = Native.WindowText(hwnd);
+        var proc = ProcessInfo.Get(pid);
         // Apps that are still starting up (msiexec) time out or have no text yet: back off and retry before giving up.
+        // Elevated targets are blocked by UIPI, so retrying would only add latency.
         var snap = reader.Read(w.Hwnd);
-        for (int attempt = 1; attempt <= 3 && (snap.Error is not null || !snap.Nodes.Any(n => n.ControlType is "Text" && n.Name.Length > 0)); attempt++)
+        bool retryable = proc.Elevation is not (ElevationState.Elevated or ElevationState.AccessDenied);
+        for (int attempt = 1; retryable && attempt <= 3 && (snap.Error is not null || !snap.Nodes.Any(n => n.ControlType is "Text" && n.Name.Length > 0)); attempt++)
         {
             Thread.Sleep(250 * attempt);
             if (!PInvoke.IsWindow(hwnd)) return;
@@ -186,7 +189,6 @@ public sealed class DialogMonitor : IDisposable
         }
 
         var icon = cls == "#32770" ? Native.MessageBoxIcon(hwnd).Severity : DialogSeverity.None;
-        var proc = ProcessInfo.Get(pid);
         Emit(w.Hwnd, cls, title.Length > 0 ? title : snap.RootName, snap, icon, proc, w.Source, w.Timestamp);
     }
 
