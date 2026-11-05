@@ -72,7 +72,8 @@ public sealed class DialogMonitor : IDisposable
         _winEvents = new WinEventSource((hwnd, kind, detail) =>
         {
             long now = Stopwatch.GetTimestamp();
-            _queue.Add(kind is WinEventKind.Hidden or WinEventKind.Destroyed
+            if (kind == WinEventKind.Hidden) return; // hidden != closed (owner minimized); bubbles follow show/hide themselves
+            _queue.Add(kind == WinEventKind.Destroyed
                 ? new ClosedWork(hwnd, now)
                 : new WindowWork(hwnd, kind, DetectionSource.WinEvent, null, now));
         });

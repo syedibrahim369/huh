@@ -50,6 +50,28 @@ tests/Huh.Tests      xUnit v3 (Microsoft.Testing.Platform runner)
 - Caveat: the text rules were written before the first run, but the harness and the rules come from the same author.
   Real-world precision will be lower; the per-app exclusion list (M6) is the safety valve.
 
+### M2 bubble design
+- Dev display: one 14" 1920x1200 panel at **125% (120 DPI)**, work area 1920x1140. Mixed-DPI placement is covered by unit
+  tests on fake monitor geometry (no second monitor available).
+- `BubblePlacer` (Core, pure): bubble size in DIPs, converted with the DPI of the monitor the bubble *lands on*; prefers
+  right > left > below > above > overlap-the-corner; slides along the dialog edge to stay in the work area; when it spills
+  onto a neighbouring monitor it's pushed fully onto it (away from the dialog, never over it).
+- `WindowFollower` (Core): out-of-context hooks scoped to the dialog's pid/tid for LOCATIONCHANGE, SHOW/HIDE and
+  MINIMIZESTART/END, plus global FOREGROUND. Created on the UI thread (WinUI pumps Win32 messages, so callbacks arrive there).
+- `BubbleWindow` (App): OverlappedPresenter with border but no title bar (keeps the native shadow + rounded corners),
+  `WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW`, `IsShownInSwitchers=false`, shown with `SW_SHOWNOACTIVATE` (never `Activate()`).
+  Height is content-driven (XAML measure at 340 DIP wide), re-placed on size change.
+- Z-order: directly above its dialog (not topmost) unless the dialog itself is topmost. An unrelated window covering the
+  dialog also covers the bubble.
+- `AlwaysActiveAcrylic`: custom SystemBackdrop with `IsInputActive=true` and higher tint/luminosity opacity than the default
+  (the stock acrylic was unreadable over busy content).
+- App has no main window: `DispatcherShutdownMode.OnExplicitShutdown`. Diagnostics log at `%LOCALAPPDATA%\huh\logs\huh.log`
+  (events only, never dialog text). `HUH_THEME=Light|Dark` forces a theme for testing.
+- Verified with `Huh.Probe bubble` (46 checks over 5 dialog types: focus never stolen, styles, placement == placer to the pixel
+  at 5 positions + a simulated drag, z-order incl. a covering window, minimize/restore of the owner, close). 46/46 in 5
+  consecutive runs, dark and light theme. Report: `docs/reports/m2-bubble.md`. Screenshots stay in `artifacts/` (they show the
+  dev's user path in the bubble, so they're not committed).
+
 ## Gotchas
 - `SupportedOSPlatformVersion` can't be set globally: `net10.0-windows` has TargetPlatformVersion 7.0 (NETSDK1135).
 - .NET 10 SDK: `dotnet test` needs `"test": {"runner": "Microsoft.Testing.Platform"}` in global.json for xUnit v3; use `dotnet test --project ...`.
@@ -70,12 +92,24 @@ tests/Huh.Tests      xUnit v3 (Microsoft.Testing.Platform runner)
 - Shell "File In Use" is an `OperationStatusWindow` (not #32770) and only appears if another process holds the lock and the
   IFileOperation has an owner window.
 - The csrss hard-error box ("code execution cannot proceed") IS readable from medium IL.
+- **Invisible resize borders**: SetWindowPos sizes the *outer* rect; a bordered window's visible frame is inset (8 px at
+  125%). Compensate with GetWindowRect vs DWMWA_EXTENDED_FRAME_BOUNDS.
+- **EVENT_SYSTEM_FOREGROUND arrives before the new foreground window is raised**, so re-stack again ~120 ms later.
+- **Minimizing a dialog's owner HIDES the dialog** (no destroy). Treating HIDE as close killed the bubble for good (content
+  de-dupe then blocked re-detection). Only EVENT_OBJECT_DESTROY means closed; the bubble follows SHOW/HIDE itself.
+- A dialog can be destroyed before the UI thread gets to its bubble (cold XAML start): check the dialog still exists before
+  creating/showing a bubble.
+- XAML type-info generator tries to `new` public property types of a Window: keep `DialogInfo` properties internal.
+- A process started by the probe inherits the probe's stdout; if the probe dies without killing it, `| grep` never sees EOF.
+- TaskDialogs without a Cancel button ignore WM_CLOSE.
+- First launch after a rebuild can take ~12 s to reach OnLaunched (most likely Defender scanning new binaries); normally ~0.7 s.
+  First bubble after start ~0.6-1.7 s (XAML cold start); later bubbles 85-270 ms.
 - Harness `run` scenarios that spawn helpers (rundll32/regsvr32/msiexec) report the helper's process; the probe matches by name.
 
 ## Milestones
 - [x] M0 Setup
 - [x] M1 Detection (incl. UIPI path, verified with an elevated harness)
-- [ ] M2 Bubble
+- [x] M2 Bubble (mixed-DPI covered by unit tests only)
 - [ ] M3 Deterministic decoding
 - [ ] M4 AI explanation (opt-in)
 - [ ] M5 Fix actions
@@ -84,6 +118,8 @@ tests/Huh.Tests      xUnit v3 (Microsoft.Testing.Platform runner)
 ## Left / ideas
 - Localized dialogs: text cues are English-only. MessageBoxes are covered by the icon signal; TaskDialogs are not.
 - Chromium/Edge in-page `alert()` and XAML ContentDialogs: UIA element path exists (IsDialog) but is not in the harness yet.
+- M6: pre-warm XAML at startup (first bubble is slow); single-instance; tray icon to quit (today: kill the process).
+- M2 follow-ups: real mixed-DPI test when a second monitor is available; WM_DPICHANGED re-place is untested.
 - Harness/probe: `dotnet build` both, then `tools/Huh.Probe/bin/Debug/net10.0-windows/Huh.Probe.exe score` (`--verbose` dumps UIA trees).
 - Check Gemini free-tier RPM/RPD on https://aistudio.google.com/rate-limit (login required).
 

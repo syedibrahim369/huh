@@ -1,50 +1,40 @@
-﻿using Microsoft.UI.Xaml;
-using Microsoft.UI.Xaml.Controls;
-using Microsoft.UI.Xaml.Controls.Primitives;
-using Microsoft.UI.Xaml.Data;
-using Microsoft.UI.Xaml.Input;
-using Microsoft.UI.Xaml.Media;
-using Microsoft.UI.Xaml.Navigation;
-using Microsoft.UI.Xaml.Shapes;
-using System;
-using System.Collections.Generic;
-using System.IO;
-using System.Linq;
-using System.Runtime.InteropServices.WindowsRuntime;
-using Windows.ApplicationModel;
-using Windows.ApplicationModel.Activation;
-using Windows.Foundation;
-using Windows.Foundation.Collections;
+﻿using Huh.Core.Detection;
+using Microsoft.UI.Dispatching;
+using Microsoft.UI.Xaml;
 
-// To learn more about WinUI, the WinUI project structure,
-// and more about our project templates, see: http://aka.ms/winui-project-info.
+namespace Huh;
 
-namespace Huh
+/// <summary>
+/// huh has no main window: it runs in the background (tray icon arrives in M6), watches for error dialogs and shows a bubble
+/// beside each one.
+/// </summary>
+public partial class App : Application
 {
-    /// <summary>
-    /// Provides application-specific behavior to supplement the default Application class.
-    /// </summary>
-    public partial class App : Application
+    private DialogMonitor? _monitor;
+    private BubbleManager? _bubbles;
+
+    public App()
     {
-        private Window? _window;
+        InitializeComponent();
+    }
 
-        /// <summary>
-        /// Initializes the singleton application object.  This is the first line of authored code
-        /// executed, and as such is the logical equivalent of main() or WinMain().
-        /// </summary>
-        public App()
-        {
-            InitializeComponent();
-        }
+    protected override void OnLaunched(LaunchActivatedEventArgs args)
+    {
+        // Without windows, the default (exit when the last window closes) would end the app after the first bubble.
+        DispatcherShutdownMode = DispatcherShutdownMode.OnExplicitShutdown;
 
-        /// <summary>
-        /// Invoked when the application is launched.
-        /// </summary>
-        /// <param name="args">Details about the launch request and process.</param>
-        protected override void OnLaunched(Microsoft.UI.Xaml.LaunchActivatedEventArgs args)
+        var ui = DispatcherQueue.GetForCurrentThread();
+        _bubbles = new BubbleManager();
+        _monitor = new DialogMonitor();
+        _monitor.DialogDetected += d =>
         {
-            _window = new MainWindow();
-            _window.Activate();
-        }
+            DevLog.Write($"detected 0x{d.Hwnd:X} {d.Process.Name} {d.Severity} blocked={d.BlockedByUipi} {d.LatencyMs:F0}ms");
+            if (d.IsError || d.BlockedByUipi) ui.TryEnqueue(() => _bubbles.Show(d));
+        };
+        _monitor.DialogClosed += h => { DevLog.Write($"dialog 0x{h:X} destroyed"); ui.TryEnqueue(() => _bubbles.Close(h)); };
+        _monitor.Log += m => DevLog.Write($"monitor: {m}");
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        _monitor.Start();
+        DevLog.Write($"monitor started in {sw.ElapsedMilliseconds} ms (process up {(DateTime.Now - System.Diagnostics.Process.GetCurrentProcess().StartTime).TotalMilliseconds:F0} ms)");
     }
 }

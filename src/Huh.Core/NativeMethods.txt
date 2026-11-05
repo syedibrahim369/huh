@@ -69,3 +69,24 @@ WINDOW_STYLE
 GetIconInfoEx
 ICONINFOEXW
 DeleteObject
+
+// --- M2: geometry + following ---
+EnumDisplayMonitors
+GetMonitorInfo
+MONITORINFO
+MonitorFromWindow
+GetDpiForMonitor
+DwmGetWindowAttribute
+DWMWINDOWATTRIBUTE
+IsIconic
+GetForegroundWindow
+GetWindowRect
+SetWindowPos
+SET_WINDOW_POS_FLAGS
+HWND_TOPMOST
+HWND_NOTOPMOST
+HWND_TOP
+SetWindowLong
+ShowWindow
+DwmSetWindowAttribute
+DWM_WINDOW_CORNER_PREFERENCE

@@ -15,6 +15,16 @@ string mode = args.FirstOrDefault() ?? "watch";
 bool verbose = args.Contains("--verbose");
 string? Opt(string name) { int i = Array.IndexOf(args, name); return i >= 0 && i + 1 < args.Length ? args[i + 1] : null; }
 
+string RepoPath(params string[] parts) => Path.GetFullPath(Path.Combine([AppContext.BaseDirectory, "..", "..", "..", "..", "..", .. parts]));
+
+if (mode == "bubble")
+{
+    return BubbleCheck.Run(
+        Opt("--harness") ?? RepoPath("tools", "Huh.TestHarness", "bin", "Debug", "net10.0-windows", "Huh.TestHarness.exe"),
+        Opt("--app") ?? RepoPath("src", "Huh.App", "bin", "x64", "Debug", "net10.0-windows10.0.26100.0", "win-x64", "Huh.exe"),
+        Opt("--out") ?? RepoPath("artifacts", "m2"));
+}
+
 using var monitor = new DialogMonitor();
 var detections = new BlockingCollection<DialogInfo>();
 monitor.DialogDetected += d => detections.Add(d);
