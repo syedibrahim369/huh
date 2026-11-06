@@ -1,5 +1,6 @@
 using System.Runtime.InteropServices;
 using System.Runtime.InteropServices.Marshalling;
+using Windows.Win32;
 using Windows.Win32.Foundation;
 using Windows.Win32.UI.Accessibility;
 using Huh.Core.Interop;
@@ -144,6 +145,33 @@ internal sealed class UiaReader
             e = parent;
         }
         return hit;
+    }
+
+    /// <summary>Test tooling: find a Button / Hyperlink / CheckBox in a window by (part of) its name and invoke or toggle it.
+    /// Uses UIA patterns, so it neither moves the mouse nor activates the window.</summary>
+    public string Activate(nint hwnd, string nameContains, bool exact = false)
+    {
+        var root = Automation.ElementFromHandle((HWND)hwnd);
+        var found = root.FindAllBuildCache(TreeScope.TreeScope_Descendants, _all, _cache);
+        int n = found.get_Length();
+        for (int i = 0; i < n; i++)
+        {
+            var e = found.GetElement(i);
+            var type = e.get_CachedControlType();
+            if (type is not (UIA_CONTROLTYPE_ID.UIA_ButtonControlTypeId or UIA_CONTROLTYPE_ID.UIA_HyperlinkControlTypeId or UIA_CONTROLTYPE_ID.UIA_CheckBoxControlTypeId)) continue;
+            var name = Native.Take(e.get_CachedName());
+            if (exact ? !name.Equals(nameContains, StringComparison.OrdinalIgnoreCase) : !name.Contains(nameContains, StringComparison.OrdinalIgnoreCase)) continue;
+            if (type == UIA_CONTROLTYPE_ID.UIA_CheckBoxControlTypeId)
+            {
+                e.GetCurrentPatternAs<IUIAutomationTogglePattern>(UIA_PATTERN_ID.UIA_TogglePatternId, out var toggle);
+                toggle.Toggle();
+                return $"toggled checkbox '{name}'";
+            }
+            e.GetCurrentPatternAs<IUIAutomationInvokePattern>(UIA_PATTERN_ID.UIA_InvokePatternId, out var invoke);
+            invoke.Invoke();
+            return $"invoked '{name}'";
+        }
+        return $"nothing named '*{nameContains}*' found";
     }
 
     /// <summary>Screen rectangle of an element in physical pixels, or null if it's gone / has no area.</summary>

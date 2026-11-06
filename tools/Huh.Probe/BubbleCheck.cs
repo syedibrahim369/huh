@@ -216,10 +216,10 @@ internal static class BubbleCheck
     /// Waits for huh (already running) to show its next bubble, then saves a screenshot cropped to that bubble and its dialog.
     /// The dialog rectangle comes from huh's log ("anchor=l,t,r,b"), so embedded dialogs (browser alerts) crop correctly too.
     /// </summary>
-    public static int Snap(string outPath, int timeoutMs, int settleMs, bool waitAi = false)
+    public static int Snap(string outPath, int timeoutMs, int settleMs, bool waitAi = false, bool existing = false)
     {
         string log = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "huh", "logs", "huh.log");
-        long start = File.Exists(log) ? new FileInfo(log).Length : 0;
+        long start = existing ? 0 : File.Exists(log) ? new FileInfo(log).Length : 0; // --existing: the bubble already on screen
         var huh = Process.GetProcessesByName("Huh").FirstOrDefault();
         if (huh is null) { Console.Error.WriteLine("huh is not running"); return 2; }
 
@@ -228,8 +228,8 @@ internal static class BubbleCheck
         for (var sw = Stopwatch.StartNew(); sw.ElapsedMilliseconds < timeoutMs && anchorLine is null; Thread.Sleep(100))
         {
             var lines = ReadFrom(log, start).Split('\n');
-            anchorLine = lines.FirstOrDefault(l => l.Contains(": anchor="));
-            showLine = lines.FirstOrDefault(l => l.Contains("show beside dialog 0x"));
+            anchorLine = existing ? lines.LastOrDefault(l => l.Contains(": anchor=")) : lines.FirstOrDefault(l => l.Contains(": anchor="));
+            showLine = existing ? lines.LastOrDefault(l => l.Contains("show beside dialog 0x")) : lines.FirstOrDefault(l => l.Contains("show beside dialog 0x"));
         }
         if (anchorLine is null || showLine is null) { Console.Error.WriteLine("no bubble within timeout"); return 1; }
 

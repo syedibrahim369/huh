@@ -127,6 +127,19 @@ tests/Huh.Tests      xUnit v3 (Microsoft.Testing.Platform runner)
 - Tests: `ActionTests` (every action's validation, system-process denylist, confirmations, runner incl. forged actions,
   folder->file swap, unsigned ack, signature change, UAC cancel, injection cases). 207 tests total.
 
+### M5 on-screen results (2026-11-06, buttons driven via UIA Invoke/Toggle: `Huh.Probe click`)
+- System32 copy (powershell.exe, part of Windows): AI points at the dialog's "Continue" button, no action, no "Run as admin".
+- Copy: clipboard verified (title, message, program). Search: confirmation shows huh's query + "Bing"; cancelled.
+- Notepad save to C:\: AI -> Open folder Documents; confirmation shows full local path; ran it: Explorer opened Documents.
+- Harness update failure (unsigned): AI -> Open Windows Update settings; confirmation shows page name + URI; ran it.
+- Unsigned override: red panel (path + UNSIGNED + "Arguments: none"), button disabled until "I understand this program is
+  unsigned" is ticked; with user approval, UAC -> harness exe started with TokenElevation = ELEVATED.
+- UI bugs found and fixed on screen: Cancel was pushed out of view by the long danger label (button row is now a Grid, label
+  "Run unsigned as admin"); armed vs disabled override button looked alike (armed is now solid red); "Opens: Bing, in your
+  default browser" was monospace (monospace only for paths/URIs).
+- Gotchas: a dialog that huh's cleanup fails to close keeps its bubble (correct), which can cover the next test bubble; close
+  dialogs by HWND, not by title. A normal-rights shell can't read an elevated process's command line (WMI shows it empty).
+
 ## Gotchas
 - `SupportedOSPlatformVersion` can't be set globally: `net10.0-windows` has TargetPlatformVersion 7.0 (NETSDK1135).
 - .NET 10 SDK: `dotnet test` needs `"test": {"runner": "Microsoft.Testing.Platform"}` in global.json for xUnit v3; use `dotnet test --project ...`.
@@ -186,16 +199,15 @@ tests/Huh.Tests      xUnit v3 (Microsoft.Testing.Platform runner)
 - [x] M2 Bubble (mixed-DPI covered by unit tests only)
 - [x] M3 Deterministic decoding
 - [x] M4 AI explanation (opt-in)
-- [~] M5 Fix actions (code + unit tests done; on-screen checks pending)
+- [x] M5 Fix actions (on-screen checks done 2026-11-06, see "M5 on-screen results")
 - [ ] M6 Polish
 
 ## Left / ideas
 - Localized dialogs: text cues are English-only. MessageBoxes are covered by the icon signal; TaskDialogs are not.
 - Chromium/Edge in-page `alert()` and XAML ContentDialogs: UIA element path exists (IsDialog) but is not in the harness yet.
-- **M5 on-screen checks (pending, user screen locked):** screenshots of the suggested-fix button + confirmation for each action
-  type; red unsigned panel with the checkbox (button disabled until ticked); click-through of Open Settings / Open folder /
-  Search / Copy; Explorer System32 copy => "Use the dialog's own Continue button" hint; UAC test elevating ONLY the harness's
-  own unsigned exe, after asking the user.
+- Deterministic "use the dialog's Continue button" tip only shows when the AI suggested a rejected re-run; could also show it
+  whenever a system process's dialog has a Continue/Retry button (the AI currently says this in its steps anyway).
+- Search was verified up to the confirmation (then cancelled) so nothing opened in the user's browser; execution is unit-tested.
 - README (M6): describe the AI-keyword injection check honestly as one layer; the real protection is the allowlist,
   parameter validation and the user's click.
 - M6: pre-warm XAML at startup (first bubble is slow); single-instance; tray icon to quit (today: kill the process).

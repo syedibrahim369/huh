@@ -44,7 +44,7 @@ public static class Confirmations
                 return new Confirmation("Run an UNSIGNED program as administrator?",
                     [("Program", src.DisplayName), ("Path", a.Target!), ("Publisher", "UNSIGNED: nobody has verified who made this program" +
                         (src.Publisher is { } claim ? $" (it claims to be “{claim}”)" : "")), ("Arguments", "none")],
-                    "Run unsigned program as administrator", Danger: true,
+                    "Run unsigned as admin", Danger: true,
                     AcknowledgeText: "I understand this program is unsigned",
                     Note: "Running it as administrator gives it full control of your PC. Windows will also ask for permission.");
             case FixActionId.RerunAsAdmin:

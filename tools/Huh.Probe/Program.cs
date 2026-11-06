@@ -56,10 +56,32 @@ if (mode == "uia" && args.Length > 1)
     return 0;
 }
 
+if (mode == "click" && Opt("--text") is { } clickText)
+{
+    // Test tooling: invoke a button/link (or toggle a checkbox) inside huh's visible bubble(s) via UI Automation.
+    var huhPid = Process.GetProcessesByName("Huh").FirstOrDefault()?.Id;
+    if (huhPid is null) { Console.Error.WriteLine("huh is not running"); return 2; }
+    var reader = new Huh.Core.Dialogs.UiaReader();
+    var result = "no visible bubble";
+    Diag.EnumWindows((h, _) =>
+    {
+        Diag.GetWindowThreadProcessId(h, out var pid);
+        var cls = new StringBuilder(256); Diag.GetClassNameW(h, cls, 256);
+        if (pid == huhPid && Diag.IsWindowVisible(h) && cls.ToString() == "WinUIDesktopWin32WindowClass")
+        {
+            result = reader.Activate(h, clickText, args.Contains("--exact"));
+            if (!result.StartsWith("nothing", StringComparison.Ordinal)) return false;
+        }
+        return true;
+    }, 0);
+    Console.WriteLine(result);
+    return result.StartsWith("nothing", StringComparison.Ordinal) || result == "no visible bubble" ? 1 : 0;
+}
+
 if (mode == "snap")
 {
     return BubbleCheck.Snap(Opt("--out") ?? RepoPath("artifacts", "m3", "snap.png"),
-        int.Parse(Opt("--timeout") ?? "20000"), int.Parse(Opt("--settle") ?? "900"), args.Contains("--wait-ai"));
+        int.Parse(Opt("--timeout") ?? "20000"), int.Parse(Opt("--settle") ?? "900"), args.Contains("--wait-ai"), args.Contains("--existing"));
 }
 
 if (mode == "bubble")

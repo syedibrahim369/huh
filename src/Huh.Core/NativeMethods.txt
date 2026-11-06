@@ -125,3 +125,6 @@ CERT_E_CHAINING
 LoadLibraryEx
 LOAD_LIBRARY_FLAGS
 IUIAutomationTreeWalker
+IUIAutomationInvokePattern
+IUIAutomationTogglePattern
+UIA_PATTERN_ID

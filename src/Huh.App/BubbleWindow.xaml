@@ -90,10 +90,16 @@
                     <CheckBox x:Name="ConfirmAck" Visibility="Collapsed" Checked="OnAckChanged" Unchecked="OnAckChanged">
                         <TextBlock x:Name="ConfirmAckText" TextWrapping="Wrap" FontSize="12" />
                     </CheckBox>
-                    <StackPanel Orientation="Horizontal" Spacing="8" HorizontalAlignment="Right">
-                        <Button x:Name="ConfirmCancel" Content="Cancel" Click="OnConfirmCancel" />
-                        <Button x:Name="ConfirmGo" Style="{StaticResource AccentButtonStyle}" Click="OnConfirmGo" />
-                    </StackPanel>
+                    <!-- Grid, not a horizontal StackPanel: a long confirm label must never push Cancel out of view. -->
+                    <Grid ColumnSpacing="8">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <Button x:Name="ConfirmCancel" Grid.Column="1" Content="Cancel" Click="OnConfirmCancel" />
+                        <Button x:Name="ConfirmGo" Grid.Column="2" Style="{StaticResource AccentButtonStyle}" Click="OnConfirmGo" />
+                    </Grid>
                 </StackPanel>
             </Border>
             <TextBlock x:Name="ActionResult" Visibility="Collapsed" TextWrapping="Wrap" Style="{StaticResource CaptionTextBlockStyle}" />

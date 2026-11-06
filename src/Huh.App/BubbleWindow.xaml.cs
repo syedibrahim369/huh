@@ -371,6 +371,7 @@ public sealed partial class BubbleWindow : Window
             _aiAction = a;
             AiActionText.Text = a.Label + "…";
             AiActionIcon.Glyph = G(IconFor(a.Id));
+            AutomationProperties.SetName(AiActionChip, a.Label);
             AiActionChip.Visibility = Visibility.Visible;
             ToolTipService.SetToolTip(AiActionChip, "Suggested fix, checked by huh. You'll see exactly what happens before anything happens.");
         }
@@ -481,7 +482,7 @@ public sealed partial class BubbleWindow : Window
         {
             var t = new TextBlock { TextWrapping = TextWrapping.Wrap, FontSize = 12 };
             t.Inlines.Add(new Run { Text = label + ": ", FontWeight = FontWeights.SemiBold });
-            bool mono = label is "Path" or "Folder" or "Opens";
+            bool mono = label is "Path" or "Folder" || (label == "Opens" && value.Contains(':') && !value.Contains(' '));
             t.Inlines.Add(new Run { Text = value, FontFamily = mono ? new FontFamily("Cascadia Mono, Consolas") : FontFamily.XamlAutoFontFamily });
             if (c.Danger && label is "Path" or "Publisher") t.Foreground = Brush("SystemFillColorCriticalBrush");
             ConfirmDetails.Children.Add(t);
@@ -492,6 +493,7 @@ public sealed partial class BubbleWindow : Window
         ConfirmAck.IsChecked = false;
         ConfirmAck.Visibility = c.AcknowledgeText is null ? Visibility.Collapsed : Visibility.Visible;
         ConfirmAckText.Text = c.AcknowledgeText ?? "";
+        AutomationProperties.SetName(ConfirmAck, c.AcknowledgeText ?? "");
         ConfirmGo.IsEnabled = c.AcknowledgeText is null; // the deliberate second step for the unsigned override
 
         if (c.Danger)
@@ -513,12 +515,28 @@ public sealed partial class BubbleWindow : Window
             SetIcon(ConfirmIcon, IconFor(a.Id), "AccentTextFillColorPrimaryBrush");
             ConfirmGo.Style = (Style)Application.Current.Resources["AccentButtonStyle"];
             ConfirmGo.ClearValue(Control.ForegroundProperty);
+            ConfirmGo.ClearValue(Control.BackgroundProperty);
         }
         ActionResult.Visibility = Visibility.Collapsed;
         ConfirmPanel.Visibility = Visibility.Visible; // height changes -> Reposition()
     }
 
-    private void OnAckChanged(object sender, RoutedEventArgs e) => ConfirmGo.IsEnabled = ConfirmAck.IsChecked == true;
+    private void OnAckChanged(object sender, RoutedEventArgs e)
+    {
+        bool ok = ConfirmAck.IsChecked == true;
+        ConfirmGo.IsEnabled = ok;
+        // Make the armed state unmistakable: solid red once the user has acknowledged the warning.
+        if (ok)
+        {
+            ConfirmGo.Background = Brush("SystemFillColorCriticalBrush");
+            ConfirmGo.Foreground = Brush("TextOnAccentFillColorPrimaryBrush");
+        }
+        else
+        {
+            ConfirmGo.ClearValue(Control.BackgroundProperty);
+            ConfirmGo.Foreground = Brush("SystemFillColorCriticalBrush");
+        }
+    }
 
     private void OnConfirmCancel(object sender, RoutedEventArgs e)
     {
