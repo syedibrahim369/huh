@@ -122,6 +122,8 @@ public class ProvenanceTests
     [InlineData("This installation package could not be opened. Verify that the package exists.", "This installation package could not be opened")]
     [InlineData("Windows cannot find 'nope'. Make sure you typed the name correctly, and then try again.", "Windows cannot find 'nope'")]
     [InlineData("0x8007045D", "0x8007045D")]
+    [InlineData("C:\\huh-demo.txt\nYou don\u2019t have permission to save in this location.\nContact the administrator.", "You don\u2019t have permission to save in this location")]
+    [InlineData("report.docx\nThe file is open in another program.", "The file is open in another program")]
     public void Headline_is_the_first_sentence(string message, string expected) =>
         Assert.Equal(expected, FactsBuilder.Headline(Dialog("x", null, "Title", message)));
 

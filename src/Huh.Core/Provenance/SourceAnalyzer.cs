@@ -111,6 +111,8 @@ public static partial class SourceAnalyzer
             var v = FileVersionInfo.GetVersionInfo(path);
             string? name = !string.IsNullOrWhiteSpace(v.FileDescription) ? v.FileDescription.Trim()
                          : !string.IsNullOrWhiteSpace(v.ProductName) ? v.ProductName.Trim() : null;
+            // Some apps (Store Notepad) describe themselves as "Notepad.exe": show "Notepad".
+            if (name is not null && name.EndsWith(".exe", StringComparison.OrdinalIgnoreCase)) name = name[..^4];
             return (name, string.IsNullOrWhiteSpace(v.CompanyName) ? null : v.CompanyName.Trim());
         }
         catch { return (null, null); }

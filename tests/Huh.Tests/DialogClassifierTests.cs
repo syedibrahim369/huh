@@ -50,6 +50,8 @@ public class DialogClassifierTests
     }
 
     [Theory]
+    [InlineData("You don’t have permission to save in this location. Would you like to save in Documents instead?")] // curly apostrophe
+    [InlineData("We couldn’t find that file.")]
     [InlineData("You do not have the required permissions to open this file.")]
     [InlineData("Permission denied")]
     [InlineData("This app is not allowed to run on this PC.")]

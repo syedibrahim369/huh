@@ -40,6 +40,12 @@ public static partial class FactsBuilder
         catch (RegexMatchTimeoutException) { return false; }
     }
 
+    // "C:\folder\file.txt", "\\server\share", "report.docx": no spaces outside the path, has a separator or an extension.
+    [GeneratedRegex(@"^(?:[A-Za-z]:\\|\\\\|/)?[^\s<>|""]+(?:[\\/][^\s<>|""]*)*$|^[^\s\\/]+\.[A-Za-z0-9]{1,5}$")]
+    private static partial Regex PathOnly();
+
+    internal static bool LooksLikePathOnly(string line) => line.Length > 0 && (line.Contains('\\') || line.Contains('/') || line.Contains('.')) && PathOnly().IsMatch(line);
+
     [GeneratedRegex(@"^(.+?[.!?])(\s|$)", RegexOptions.Singleline)]
     private static partial Regex FirstSentence();
 
@@ -48,7 +54,9 @@ public static partial class FactsBuilder
         var msg = d.Message.Trim();
         if (msg.Length > 0)
         {
-            var firstLine = msg.Split('\n', 2)[0].Trim();
+            // Skip leading lines that are only a path or file name ("C:\huh-demo.txt" above "You don't have permission...").
+            var lines = msg.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+            var firstLine = lines.FirstOrDefault(l => !LooksLikePathOnly(l)) ?? lines[0];
             var s = FirstSentence().Match(firstLine) is { Success: true } m ? m.Groups[1].Value : firstLine;
             s = s.TrimEnd('.').Trim();
             if (s.Length > 0) return s.Length <= HeadlineMax ? s : s[..(HeadlineMax - 1)].TrimEnd() + "…";

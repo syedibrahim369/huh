@@ -72,7 +72,8 @@ internal static partial class DialogClassifier
             }
         }
         var message = string.Join("\n", texts);
-        var haystack = ev.Title + "\n" + message;
+        // Match on typographic-quote-normalised text (Windows 11 dialogs use U+2019 in "don’t", "can’t"...).
+        var haystack = NormalizeQuotes(ev.Title + "\n" + message);
 
         if (icon != DialogSeverity.None) signals.Add($"icon:{icon.ToString().ToLowerInvariant()}");
         var errWord = ErrorWords().Match(haystack);
@@ -104,6 +105,9 @@ internal static partial class DialogClassifier
         _ => DialogSeverity.None,
     };
 
+    internal static string NormalizeQuotes(string s) =>
+        s.Replace('’', '\'').Replace('‘', '\'').Replace('“', '"').Replace('”', '"');
+
     private static DialogSeverity Max(DialogSeverity a, DialogSeverity b) => a >= b ? a : b;
 
     // UIA hides the DirectUIHWND class inside TaskDialogs, but its parts have stable AutomationIds.
@@ -115,5 +119,5 @@ internal static partial class DialogClassifier
 
     /// <summary>Cheap title-only test used to decide whether a non-#32770 window is worth reading at all.</summary>
     public static bool TitleLooksLikeError(string title) =>
-        title.Length > 0 && (ErrorWords().IsMatch(title) || WarningWords().IsMatch(title));
+        title.Length > 0 && (ErrorWords().IsMatch(NormalizeQuotes(title)) || WarningWords().IsMatch(title));
 }

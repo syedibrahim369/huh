@@ -72,6 +72,25 @@ tests/Huh.Tests      xUnit v3 (Microsoft.Testing.Platform runner)
   consecutive runs, dark and light theme. Report: `docs/reports/m2-bubble.md`. Screenshots stay in `artifacts/` (they show the
   dev's user path in the bubble, so they're not committed).
 
+### M3 deterministic decoding (no AI)
+- `ErrorCodeDecoder`: finds 0x-hex (8 digits, not inside 16-digit pointers), bare WSH-style hex (`800A03EA`), .NET negative
+  HRESULTs, and decimals after cue words ("error 1619"); decimals Windows doesn't know are dropped. Classifies NTSTATUS
+  (0xC..., N-bit clear) vs HRESULT (facility 7 => inner Win32) vs Win32 (<0x10000). Text from FormatMessage (system table,
+  ntdll for NTSTATUS, wininet/winhttp for 12xxx), cleaned (`{Title}` headers stripped, `%hs`/`%1` -> "…"). Small curated
+  symbolic-name table (`KnownCodes`); Windows has no API for names.
+- `Authenticode`: WinVerifyTrust offline (`WTD_REVOKE_NONE` + cache-only URL retrieval, no UI), signer from the leaf cert.
+  Catalog fallback via CryptCATAdmin. "Embedded vs catalog" decided from the PE certificate table.
+- `SourceAnalyzer` badges: signed by X / unsigned (publisher "claims to be" CompanyName) / invalid / Store app (publisher from
+  the package's AppxManifest.xml; OS verified it at install) / Windows itself (csrss etc., "about X.exe" from the hard-error
+  title) / web page in <browser> (origin from "x.com says").
+- Browser JS alerts are drawn INSIDE the browser window (no HWND). Trigger: EVENT_SYSTEM_ALERT from Chrome_RenderWidgetHostHWND.
+  A dedicated MTA thread does a shallow BFS of the browser's own UI (never into Document/web content) for
+  `JavaScriptTabModalDialogViewViews` or IsDialog, retrying ~2 s (the first UIA query switches on Chromium accessibility).
+  Bubble anchors to the alert's rect, translated as the browser moves; closure detected by polling the element (400 ms).
+- Facts are built on the monitor worker thread (WinVerifyTrust off the UI thread); typically 1-60 ms, first call ~200 ms.
+- Real-world run (Run dialog, empty .msi, Notepad save to C:\, System32 copy): all four bubbles correct after the fixes below.
+  Screenshots via `Huh.Probe snap`: verifies dialog + bubble are topmost (WindowFromPoint) and masks every other pixel.
+
 ## Gotchas
 - `SupportedOSPlatformVersion` can't be set globally: `net10.0-windows` has TargetPlatformVersion 7.0 (NETSDK1135).
 - .NET 10 SDK: `dotnet test` needs `"test": {"runner": "Microsoft.Testing.Platform"}` in global.json for xUnit v3; use `dotnet test --project ...`.
@@ -104,13 +123,24 @@ tests/Huh.Tests      xUnit v3 (Microsoft.Testing.Platform runner)
 - TaskDialogs without a Cancel button ignore WM_CLOSE.
 - First launch after a rebuild can take ~12 s to reach OnLaunched (most likely Defender scanning new binaries); normally ~0.7 s.
   First bubble after start ~0.6-1.7 s (XAML cold start); later bubbles 85-270 ms.
+- **Windows 11 dialogs use U+2019 in "don’t"/"can’t"**: normalise quotes before matching (missed the Notepad permission box).
+- Notepad's permission box is a TaskDialog whose first line is the path; headline skips path-only lines.
+- On this build csrss.exe/kernel32.dll carry embedded signatures even though Get-AuthenticodeSignature reports "Catalog";
+  System32\notepad.exe is catalog-only. dotnet.exe's signer is ".NET".
+- File-mode WinVerifyTrust already validates catalog-signed files on current Windows.
+- `PACKAGE_ID` is arch-specific in CsWin32 (AnyCPU can't generate it): read AppxManifest.xml instead.
+- Chromium doesn't raise UIA WindowOpened for tab-modal JS dialogs; a full-page UIA FindFirst can take seconds and once
+  stalled the single detection worker (fixed: separate thread + shallow BFS + 2 s rate limit per window).
+- Background processes can't take focus (foreground lock) and the user's windows can cover test dialogs: screenshots must be
+  verified and masked, or they capture the user's screen. Never automate keystrokes while the user is typing.
+- `sed` with `\n`/`\u` in replacements mangles C# escapes; use the editor for those lines.
 - Harness `run` scenarios that spawn helpers (rundll32/regsvr32/msiexec) report the helper's process; the probe matches by name.
 
 ## Milestones
 - [x] M0 Setup
 - [x] M1 Detection (incl. UIPI path, verified with an elevated harness)
 - [x] M2 Bubble (mixed-DPI covered by unit tests only)
-- [ ] M3 Deterministic decoding
+- [x] M3 Deterministic decoding
 - [ ] M4 AI explanation (opt-in)
 - [ ] M5 Fix actions
 - [ ] M6 Polish
