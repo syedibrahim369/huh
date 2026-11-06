@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Window
+    x:Class="Huh.ConsentWindow"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    Title="huh: AI explanations">
+
+    <Window.SystemBackdrop>
+        <MicaBackdrop />
+    </Window.SystemBackdrop>
+
+    <Grid x:Name="Root" Padding="28,24,28,20" RowSpacing="14">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <StackPanel Spacing="4">
+            <TextBlock Text="huh?" Style="{StaticResource CaptionTextBlockStyle}" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+            <TextBlock Text="Explain errors with AI?" Style="{StaticResource SubtitleTextBlockStyle}" />
+        </StackPanel>
+
+        <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
+            <StackPanel Spacing="12" Margin="0,0,8,0">
+                <TextBlock TextWrapping="Wrap" Style="{StaticResource BodyTextBlockStyle}"
+                           Text="huh already shows what it can work out on your PC: decoded error codes, which program raised the dialog, and whether it's signed. None of that leaves your PC." />
+                <TextBlock TextWrapping="Wrap" Style="{StaticResource BodyTextBlockStyle}"
+                           Text="If you turn on AI explanations, huh sends the dialog's text and those facts to Google Gemini to get a plain-English explanation and a suggested fix." />
+
+                <StackPanel Spacing="8" Padding="14,12" CornerRadius="8" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                            BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1">
+                    <TextBlock Text="What you should know" Style="{StaticResource BodyStrongTextBlockStyle}" />
+                    <TextBlock TextWrapping="Wrap" Text="• Before sending, huh removes your user name, your user-folder paths, your computer name and e-mail addresses." />
+                    <TextBlock TextWrapping="Wrap" Foreground="{ThemeResource SystemFillColorCautionBrush}"
+                               Text="• Google's free tier may use what is sent to improve its products. Leave this off if your error messages can contain confidential information." />
+                    <TextBlock TextWrapping="Wrap" Text="• No screenshots, ever: huh reads dialog text through Windows accessibility." />
+                    <TextBlock TextWrapping="Wrap" Text="• Suggested fixes come from a fixed list, are checked by huh, and always need your click." />
+                    <TextBlock TextWrapping="Wrap" Text="• Answers are cached on your PC, so the same error isn't sent twice." />
+                </StackPanel>
+
+                <StackPanel x:Name="KeyPanel" Spacing="6">
+                    <TextBlock Text="Gemini API key" Style="{StaticResource BodyStrongTextBlockStyle}" />
+                    <TextBlock x:Name="KeyStatus" TextWrapping="Wrap" Style="{StaticResource CaptionTextBlockStyle}"
+                               Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                    <PasswordBox x:Name="KeyBox" PlaceholderText="Paste your key (free at aistudio.google.com)" PasswordChanged="OnKeyChanged" />
+                </StackPanel>
+            </StackPanel>
+        </ScrollViewer>
+
+        <TextBlock Grid.Row="2" TextWrapping="Wrap" Style="{StaticResource CaptionTextBlockStyle}" Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                   Text="You can change this later. Until you turn it on, nothing is sent anywhere." />
+
+        <StackPanel Grid.Row="3" Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8">
+            <Button x:Name="DeclineButton" Content="Not now" Click="OnDecline" />
+            <Button x:Name="AcceptButton" Content="Turn on AI explanations" Style="{StaticResource AccentButtonStyle}" Click="OnAccept" />
+        </StackPanel>
+    </Grid>
+</Window>

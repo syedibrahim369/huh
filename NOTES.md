@@ -91,6 +91,24 @@ tests/Huh.Tests      xUnit v3 (Microsoft.Testing.Platform runner)
 - Real-world run (Run dialog, empty .msi, Notepad save to C:\, System32 copy): all four bubbles correct after the fixes below.
   Screenshots via `Huh.Probe snap`: verifies dialog + bubble are topmost (WindowFromPoint) and masks every other pixel.
 
+### M4 AI explanations (opt-in)
+- Consent: `ConsentWindow` on first run (and from the bubble's "Explain this with AI" link). Settings in
+  `%LOCALAPPDATA%\huh\settings.json`; AI is off until accepted. Key: GEMINI_API_KEY env var, else DPAPI file
+  `%LOCALAPPDATA%\huh\gemini.key` (pasted on the consent screen). The key is only ever placed in the `x-goog-api-key` header.
+- Pipeline (`AiExplainService`): consent gate -> `Redactor` (profile path -> %USERPROFILE%, other profiles, user name,
+  computer name, e-mails) -> `Prompt` (untrusted text fenced in <dialog_data> with tags neutralised; huh facts in
+  <verified_facts>) -> cache (SHA-256 of prompt, 30 days, `%LOCALAPPDATA%\huh\cache\ai`) -> `GeminiExplainer` ->
+  `Explanation.Sanitized` -> `InjectionDetector` -> `FixActions.Validate`.
+- `GeminiExplainer`: generateContent, `responseJsonSchema`, `thinkingLevel: LOW`, 8 s per model; falls back to the next model
+  on 429 / 404 / 503 / timeout. Every failure is an `AiOutcome` (NoKey, Quota, Busy, Timeout, Network, Auth, ...); the
+  bubble shows one line and keeps the M3 info.
+- Action rules: allowlist only; settings pages from a fixed key list; folders must exist on a local fixed/removable drive
+  (no UNC, variables, files); re-run as admin only for signed normal programs, exe path only, never arguments, always
+  confirmed; web pages: copy text only; search queries built by huh. Injection detected => no action + caution banner.
+- Dev: `HUH_AI_FAKE=1` (canned answer) / `HUH_AI_FAKE=quota` (simulated 429): no network, AI "on" in memory only, real
+  consent untouched. Bubble checks run with HUH_AI_FAKE=1 so they don't spend quota.
+- Results: `docs/reports/m4-ai.md` (live latency 2.1-4.1 s on the primary; cache hit 38 ms).
+
 ## Gotchas
 - `SupportedOSPlatformVersion` can't be set globally: `net10.0-windows` has TargetPlatformVersion 7.0 (NETSDK1135).
 - .NET 10 SDK: `dotnet test` needs `"test": {"runner": "Microsoft.Testing.Platform"}` in global.json for xUnit v3; use `dotnet test --project ...`.
@@ -134,6 +152,14 @@ tests/Huh.Tests      xUnit v3 (Microsoft.Testing.Platform runner)
 - Background processes can't take focus (foreground lock) and the user's windows can cover test dialogs: screenshots must be
   verified and masked, or they capture the user's screen. Never automate keystrokes while the user is typing.
 - `sed` with `\n`/`\u` in replacements mangles C# escapes; use the editor for those lines.
+- Gemini docs now lead with the Interactions API; `generateContent` is still current. JSON output: `responseMimeType` +
+  `responseJsonSchema`; thinking: `thinkingConfig.thinkingLevel` (Gemini 3+ only).
+- `gemini-3.8-flash` returned 503 UNAVAILABLE ("high demand") for ~10 min on 2026-11-06 while flash-lite worked: 503 must
+  fall back, not just 429. The model metadata GET (free) is a good first check that the key and model are fine.
+- **A model will obey prompt injection** (flash-lite did): the validator + deterministic detector are the real defence,
+  never the system prompt.
+- PowerShell passes `$null` as "" to string P/Invoke parameters (FindWindow(null, title) needs [NullString]::Value).
+- Fixture JSON with nested JSON strings: generate with a serializer, never hand-escape (raw control chars, `\D`).
 - Harness `run` scenarios that spawn helpers (rundll32/regsvr32/msiexec) report the helper's process; the probe matches by name.
 
 ## Milestones
@@ -141,7 +167,7 @@ tests/Huh.Tests      xUnit v3 (Microsoft.Testing.Platform runner)
 - [x] M1 Detection (incl. UIPI path, verified with an elevated harness)
 - [x] M2 Bubble (mixed-DPI covered by unit tests only)
 - [x] M3 Deterministic decoding
-- [ ] M4 AI explanation (opt-in)
+- [x] M4 AI explanation (opt-in)
 - [ ] M5 Fix actions
 - [ ] M6 Polish
 

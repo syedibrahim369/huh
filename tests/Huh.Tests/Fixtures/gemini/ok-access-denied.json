@@ -1,0 +1,21 @@
+{
+  "candidates": [
+    {
+      "content": {
+        "role": "model",
+        "parts": [
+          {
+            "text": "{\"cause\":\"The program tried to save into a folder it isn't allowed to write to.\",\"fix_steps\":[\"Save the file in your Documents folder instead.\",\"If it must go there, ask an administrator.\"],\"action_id\":\"open_folder\",\"action_param\":\"%USERPROFILE%\\\\Documents\",\"confidence\":0.86}"
+          }
+        ]
+      },
+      "finishReason": "STOP"
+    }
+  ],
+  "usageMetadata": {
+    "promptTokenCount": 512,
+    "candidatesTokenCount": 74,
+    "thoughtsTokenCount": 120,
+    "totalTokenCount": 706
+  }
+}

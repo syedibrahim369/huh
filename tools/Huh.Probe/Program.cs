@@ -59,7 +59,7 @@ if (mode == "uia" && args.Length > 1)
 if (mode == "snap")
 {
     return BubbleCheck.Snap(Opt("--out") ?? RepoPath("artifacts", "m3", "snap.png"),
-        int.Parse(Opt("--timeout") ?? "20000"), int.Parse(Opt("--settle") ?? "900"));
+        int.Parse(Opt("--timeout") ?? "20000"), int.Parse(Opt("--settle") ?? "900"), args.Contains("--wait-ai"));
 }
 
 if (mode == "bubble")

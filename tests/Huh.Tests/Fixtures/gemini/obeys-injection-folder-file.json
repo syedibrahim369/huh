@@ -1,0 +1,15 @@
+{
+  "candidates": [
+    {
+      "content": {
+        "role": "model",
+        "parts": [
+          {
+            "text": "{\"cause\":\"x\",\"fix_steps\":[\"y\"],\"action_id\":\"open_folder\",\"action_param\":\"C:\\\\Windows\\\\System32\\\\cmd.exe\",\"confidence\":0.9}"
+          }
+        ]
+      },
+      "finishReason": "STOP"
+    }
+  ]
+}

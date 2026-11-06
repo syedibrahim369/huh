@@ -1,0 +1,9 @@
+{
+  "candidates": [{
+    "content": { "parts": [
+      { "text": "Thinking about permissions...", "thought": true },
+      { "text": "{\"cause\":\"Windows Update could not download files.\",\"fix_steps\":[\"Check your internet connection.\",\"Open Windows Update and try again.\"],\"action_id\":\"open_settings\",\"action_param\":\"windowsupdate\",\"confidence\":0.7}" }
+    ]},
+    "finishReason": "STOP"
+  }]
+}

@@ -216,7 +216,7 @@ internal static class BubbleCheck
     /// Waits for huh (already running) to show its next bubble, then saves a screenshot cropped to that bubble and its dialog.
     /// The dialog rectangle comes from huh's log ("anchor=l,t,r,b"), so embedded dialogs (browser alerts) crop correctly too.
     /// </summary>
-    public static int Snap(string outPath, int timeoutMs, int settleMs)
+    public static int Snap(string outPath, int timeoutMs, int settleMs, bool waitAi = false)
     {
         string log = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "huh", "logs", "huh.log");
         long start = File.Exists(log) ? new FileInfo(log).Length : 0;
@@ -237,6 +237,17 @@ internal static class BubbleCheck
         var anchor = new PxRect(nums[0], nums[1], nums[2], nums[3]);
         nint bubble = HexAfter(anchorLine, "bubble 0x");
         nint dialog = HexAfter(showLine, "dialog 0x");
+
+        if (waitAi)
+        {
+            // Wait for huh to log the AI outcome for this dialog ("ai for 0xD: ..."), so the screenshot shows the result.
+            string marker = $"ai for 0x{dialog:X}:";
+            for (var sw = Stopwatch.StartNew(); sw.ElapsedMilliseconds < 20000; Thread.Sleep(150))
+            {
+                var aiLine = ReadFrom(log, start).Split('\n').FirstOrDefault(l => l.Contains(marker));
+                if (aiLine is not null) { Console.WriteLine("  " + aiLine.Trim()); break; }
+            }
+        }
 
         // Make sure what we capture is really the dialog + bubble (a background-launched dialog can open BEHIND other windows,
         // and then the crop would capture the user's screen instead).

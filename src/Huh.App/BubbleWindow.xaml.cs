@@ -302,6 +302,124 @@ public sealed partial class BubbleWindow : Window
         // Height changes -> Root.SizeChanged -> Reposition() (may flip sides if it no longer fits).
     }
 
+    // ------------------------------------------------------------------ AI section (M4)
+
+    /// <summary>User clicked "Explain this with AI": the app shows the consent screen.</summary>
+    public event Action<BubbleWindow>? AiOptInRequested;
+
+    private const int GlyphSparkle = 0xE945, GlyphInfo = 0xE946, GlyphShield = 0xEA18, GlyphFolder = 0xE8B7, GlyphSettings = 0xE713,
+        GlyphCopy = 0xE8C8, GlyphSearch = 0xE721, GlyphAdmin = 0xE7EF;
+
+    internal void SetAiDisabled()
+    {
+        if (Dialog.BlockedByUipi) { AiPanel.Visibility = Visibility.Collapsed; return; }
+        ResetAi();
+        AiPanel.Visibility = Visibility.Visible;
+        AiHeader.Text = "AI explanations are off";
+        AiOptIn.Visibility = Visibility.Visible;
+    }
+
+    internal void SetAiLoading(string model)
+    {
+        ResetAi();
+        AiPanel.Visibility = Visibility.Visible;
+        AiHeader.Text = $"Asking Gemini ({model})…";
+        AiProgress.IsActive = true;
+    }
+
+    internal void SetAi(Huh.Core.AI.AiOutcome o)
+    {
+        ResetAi();
+        AiPanel.Visibility = Visibility.Visible;
+        if (o.Status == Huh.Core.AI.AiStatus.Disabled) { SetAiDisabled(); return; }
+
+        if (o.Status == Huh.Core.AI.AiStatus.Unavailable || o.Explanation is null)
+        {
+            SetIcon(AiIcon, GlyphInfo, "TextFillColorTertiaryBrush");
+            AiHeader.Text = o.UnavailableText; // M3 info above and below stays exactly as it was
+            AiHeader.TextWrapping = TextWrapping.Wrap;
+            AddAiDetails(o);
+            return;
+        }
+
+        var e = o.Explanation;
+        SetIcon(AiIcon, GlyphSparkle, "AccentTextFillColorPrimaryBrush");
+        AiHeader.Text = "Gemini explains" + (o.FromCache ? " (saved answer)" : "");
+        if (o.SuspectedInjection)
+        {
+            // The dialog tried to instruct AI tools: say so loudly, keep the explanation visible but offer nothing to click.
+            SetIcon(AiIcon, GlyphShield, "SystemFillColorCautionBrush");
+            AiHeader.Text = "Caution: this message tries to give instructions to AI tools";
+            AiHeader.TextWrapping = TextWrapping.Wrap;
+            AiHeader.Foreground = Brush("SystemFillColorCautionBrush");
+        }
+        AiCause.Text = e.Cause;
+        AiCause.Visibility = Visibility.Visible;
+        for (int i = 0; i < e.FixSteps.Count; i++)
+            AiSteps.Children.Add(new TextBlock { Text = $"{i + 1}. {e.FixSteps[i]}", TextWrapping = TextWrapping.Wrap, FontSize = 12 });
+        AiSteps.Visibility = e.FixSteps.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
+
+        if (o.Action?.Action is { } a)
+        {
+            AiActionText.Text = a.Label + (a.RequiresOverride ? " (unsigned program: blocked unless you override)" : "");
+            AiActionText.Foreground = Brush(a.RequiresOverride ? "SystemFillColorCriticalBrush" : "TextFillColorPrimaryBrush");
+            AiActionIcon.Glyph = G(a.Id switch
+            {
+                Huh.Core.Actions.FixActionId.OpenSettings => GlyphSettings,
+                Huh.Core.Actions.FixActionId.OpenFolder => GlyphFolder,
+                Huh.Core.Actions.FixActionId.RerunAsAdmin => GlyphAdmin,
+                Huh.Core.Actions.FixActionId.CopyErrorText => GlyphCopy,
+                _ => GlyphSearch,
+            });
+            AiActionChip.Visibility = Visibility.Visible;
+            ToolTipService.SetToolTip(AiActionChip, "Suggested fix. One-click actions arrive in the next milestone; huh will always ask first.");
+        }
+        else if (o.SuspectedInjection)
+        {
+            AiNote.Text = "Treat the advice above with suspicion. Real error messages don't address AI tools, so huh offers no one-click action here.";
+            AiNote.Foreground = Brush("SystemFillColorCautionBrush");
+            AiNote.Visibility = Visibility.Visible;
+        }
+        else if (o.Action?.RejectedReason is { } why)
+        {
+            AiNote.Text = $"huh ignored the AI's suggested action: {why}.";
+            AiNote.Foreground = Brush("SystemFillColorCautionBrush");
+            AiNote.Visibility = Visibility.Visible;
+        }
+        AddAiDetails(o);
+    }
+
+    private void ResetAi()
+    {
+        AiProgress.IsActive = false;
+        AiCause.Visibility = AiSteps.Visibility = AiActionChip.Visibility = AiNote.Visibility = AiOptIn.Visibility = Visibility.Collapsed;
+        AiSteps.Children.Clear();
+        AiHeader.TextWrapping = TextWrapping.NoWrap;
+        AiHeader.Foreground = Brush("TextFillColorSecondaryBrush");
+        SetIcon(AiIcon, GlyphSparkle, "AccentTextFillColorPrimaryBrush");
+    }
+
+    private void AddAiDetails(Huh.Core.AI.AiOutcome o)
+    {
+        if (_aiDetailsAdded) return;
+        _aiDetailsAdded = true;
+        Section("AI");
+        Line("Status", o.Status == Huh.Core.AI.AiStatus.Ok
+            ? $"answered by {o.Model}{(o.FromCache ? " (saved answer, no request sent)" : $" in {o.LatencyMs:F0} ms")}"
+            : $"{o.Reason}{(o.Detail is { } d ? ": " + d : "")}");
+        if (o.Explanation is { } e)
+        {
+            Line("Confidence", $"{e.Confidence:P0}");
+            Line("Suggested action", o.Action?.Action is { } a ? $"{a.Label} (validated{(a.RequiresOverride ? ", needs unsigned override" : "")})"
+                : o.Action?.RejectedReason is { } why ? $"rejected: {why}" : "none");
+        }
+        Line("Sent to Gemini", "dialog text and the facts above, with your user name, user-folder paths, computer name and e-mail addresses removed");
+    }
+
+    private bool _aiDetailsAdded;
+
+    private void OnAiOptIn(object sender, RoutedEventArgs e) => AiOptInRequested?.Invoke(this);
+
     // ------------------------------------------------------------------ helpers
 
     private static string G(int codePoint) => char.ConvertFromUtf32(codePoint);

@@ -1,0 +1,14 @@
+{
+  "candidates": [
+    {
+      "content": {
+        "parts": [
+          {
+            "text": "{\"cause\":\"Call support at 1-800-SCAM‮ now\\u0007\",\"fix_steps\":[\"a\",\"b\",\"c\",\"d\",\"e\",\"f\"],\"action_id\":\"search_web\",\"action_param\":\"https://evil.example/?q=1\",\"confidence\":7}"
+          }
+        ]
+      },
+      "finishReason": "STOP"
+    }
+  ]
+}

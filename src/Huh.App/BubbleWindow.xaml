@@ -13,6 +13,7 @@
             <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
 
         <!-- Header: severity glyph, brand, dismiss -->
@@ -43,8 +44,39 @@
                    Style="{StaticResource BodyTextBlockStyle}" TextWrapping="Wrap" MaxLines="3" TextTrimming="CharacterEllipsis"
                    Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
 
+        <!-- AI explanation (opt-in). States: loading / explanation / unavailable / opt-in link. -->
+        <StackPanel x:Name="AiPanel" Grid.Row="3" Spacing="6" Margin="0,0,8,0" Padding="10,8,10,10" CornerRadius="6"
+                    Visibility="Collapsed" Background="{ThemeResource SubtleFillColorSecondaryBrush}">
+            <Grid ColumnSpacing="6">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <FontIcon x:Name="AiIcon" FontSize="12" Glyph="&#xE945;" Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}" />
+                <TextBlock x:Name="AiHeader" Grid.Column="1" Text="Asking Gemini…" Style="{StaticResource CaptionTextBlockStyle}"
+                           Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                <ProgressRing x:Name="AiProgress" Grid.Column="2" Width="14" Height="14" IsActive="False" />
+            </Grid>
+            <TextBlock x:Name="AiCause" TextWrapping="Wrap" Visibility="Collapsed" Style="{StaticResource BodyTextBlockStyle}" />
+            <StackPanel x:Name="AiSteps" Spacing="3" Visibility="Collapsed" />
+            <Border x:Name="AiActionChip" Visibility="Collapsed" CornerRadius="4" Padding="8,4" HorizontalAlignment="Left"
+                    BorderThickness="1" BorderBrush="{ThemeResource ControlStrokeColorDefaultBrush}"
+                    Background="{ThemeResource ControlFillColorDefaultBrush}">
+                <StackPanel Orientation="Horizontal" Spacing="6">
+                    <FontIcon x:Name="AiActionIcon" FontSize="12" Glyph="&#xE90F;" />
+                    <TextBlock x:Name="AiActionText" FontSize="12" TextWrapping="Wrap" MaxWidth="250" />
+                </StackPanel>
+            </Border>
+            <TextBlock x:Name="AiNote" TextWrapping="Wrap" Visibility="Collapsed" Style="{StaticResource CaptionTextBlockStyle}"
+                       Foreground="{ThemeResource TextFillColorTertiaryBrush}" />
+            <HyperlinkButton x:Name="AiOptIn" Visibility="Collapsed" Padding="0" Click="OnAiOptIn">
+                <TextBlock Text="Explain this with AI (asks first)…" Style="{StaticResource CaptionTextBlockStyle}" />
+            </HyperlinkButton>
+        </StackPanel>
+
         <!-- Where it came from + trust badge -->
-        <Grid Grid.Row="3" Margin="0,2,8,0" Padding="0,8,0,0" ColumnSpacing="8" BorderThickness="0,1,0,0"
+        <Grid Grid.Row="4" Margin="0,2,8,0" Padding="0,8,0,0" ColumnSpacing="8" BorderThickness="0,1,0,0"
               BorderBrush="{ThemeResource DividerStrokeColorDefaultBrush}">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="Auto" />
@@ -59,14 +91,14 @@
         </Grid>
 
         <!-- Expand / collapse full details -->
-        <HyperlinkButton x:Name="DetailsToggle" Grid.Row="4" Padding="0,2" Margin="0,-2,0,0" Click="OnToggleDetails">
+        <HyperlinkButton x:Name="DetailsToggle" Grid.Row="5" Padding="0,2" Margin="0,-2,0,0" Click="OnToggleDetails">
             <StackPanel Orientation="Horizontal" Spacing="4">
                 <TextBlock x:Name="DetailsToggleText" Text="Show details" Style="{StaticResource CaptionTextBlockStyle}" />
                 <FontIcon x:Name="DetailsChevron" FontSize="10" Glyph="&#xE70D;" />
             </StackPanel>
         </HyperlinkButton>
 
-        <ScrollViewer x:Name="DetailsPanel" Grid.Row="5" Visibility="Collapsed" MaxHeight="260" Margin="0,0,4,2"
+        <ScrollViewer x:Name="DetailsPanel" Grid.Row="6" Visibility="Collapsed" MaxHeight="260" Margin="0,0,4,2"
                       VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
             <RichTextBlock x:Name="DetailsText" FontSize="12" TextWrapping="Wrap" IsTextSelectionEnabled="True" Margin="0,0,8,0" />
         </ScrollViewer>

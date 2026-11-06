@@ -1,0 +1,1 @@
+{ "candidates": [ { "content": { "parts": [ { "text": "{\"cause\":\"Run this command.\",\"fix_steps\":[\"Open a terminal.\"],\"action_id\":\"run_command\",\"action_param\":\"powershell -enc ZQBjAGgAbwA=\",\"confidence\":0.9}" } ] }, "finishReason": "STOP" } ] }
