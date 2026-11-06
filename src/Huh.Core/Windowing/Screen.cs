@@ -104,6 +104,21 @@ public static unsafe class Screen
     public static void Hide(nint hwnd) => PInvoke.ShowWindow((HWND)hwnd, SHOW_WINDOW_CMD.SW_HIDE);
 
     /// <summary>
+    /// DWM cloaking: the window is still rendered by its app but never shown on screen. Used to pre-warm the bubble at startup
+    /// (XAML, templates, fonts, backdrop) without anything appearing.
+    /// </summary>
+    public static void Cloak(nint hwnd, bool cloak)
+    {
+        BOOL v = cloak;
+        PInvoke.DwmSetWindowAttribute((HWND)hwnd, DWMWINDOWATTRIBUTE.DWMWA_CLOAK, &v, (uint)sizeof(BOOL));
+    }
+
+    /// <summary>Moves a window (outer rect) without changing z-order or activation.</summary>
+    public static void MoveTo(nint hwnd, PxRect rect) =>
+        PInvoke.SetWindowPos((HWND)hwnd, HWND.Null, rect.Left, rect.Top, rect.Width, rect.Height,
+            SET_WINDOW_POS_FLAGS.SWP_NOACTIVATE | SET_WINDOW_POS_FLAGS.SWP_NOZORDER | SET_WINDOW_POS_FLAGS.SWP_NOOWNERZORDER);
+
+    /// <summary>
     /// SetWindowPos works on the outer window rect, which includes the invisible resize borders DWM draws around bordered windows
     /// (8 px at 125% on the left/right/bottom). Expand the desired visible rect by the window's current insets.
     /// </summary>

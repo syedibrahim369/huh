@@ -9,7 +9,9 @@ namespace Huh;
 /// Desktop Acrylic that always renders in its "active" state. The stock <see cref="DesktopAcrylicBackdrop"/> follows window
 /// activation and falls back to a flat color when inactive, and the bubble is NEVER active (WS_EX_NOACTIVATE).
 /// </summary>
-internal sealed class AlwaysActiveAcrylic : SystemBackdrop
+// partial: CsWinRT generates the WinRT vtable for this subclass at build time. Without it, the trimmed Release build throws
+// InvalidCastException when the backdrop is assigned (found in M6).
+internal sealed partial class AlwaysActiveAcrylic : SystemBackdrop
 {
     private DesktopAcrylicController? _controller;
     private SystemBackdropConfiguration? _config;

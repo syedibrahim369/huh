@@ -15,7 +15,7 @@ internal static class DevLog
     {
         try
         {
-            var dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "huh", "logs");
+            var dir = Huh.Core.Settings.HuhPaths.Logs;
             Directory.CreateDirectory(dir);
             var path = Path.Combine(dir, "huh.log");
             if (File.Exists(path) && new FileInfo(path).Length > 1_000_000) File.Delete(path);

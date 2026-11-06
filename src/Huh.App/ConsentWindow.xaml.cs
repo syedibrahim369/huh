@@ -15,11 +15,19 @@ public sealed partial class ConsentWindow : Window
     /// <summary>Raised after the user decides (true = AI on).</summary>
     public event Action<bool>? Decided;
 
-    internal ConsentWindow(HuhSettings settings)
+    internal ConsentWindow(HuhSettings settings, bool showWelcome)
     {
         _settings = settings;
         InitializeComponent();
-        AppWindow.Resize(Scale(new Windows.Graphics.SizeInt32(560, 720)));
+        AppWindow.SetIcon(Path.Combine(AppContext.BaseDirectory, "Assets", "huh.ico"));
+        AppWindow.Resize(Scale(new Windows.Graphics.SizeInt32(560, 700)));
+        if (showWelcome)
+        {
+            Title = "Welcome to huh";
+            WelcomePanel.Visibility = Visibility.Visible;
+            ConsentPanel.Visibility = Visibility.Collapsed;
+        }
+        else Title = "huh: AI explanations";
         if (AppWindow.Presenter is OverlappedPresenter p) { p.IsMaximizable = false; p.IsMinimizable = false; }
         CenterOnScreen();
 
@@ -27,6 +35,7 @@ public sealed partial class ConsentWindow : Window
         {
             KeyStatus.Text = "Using the GEMINI_API_KEY set in your environment.";
             KeyBox.Visibility = Visibility.Collapsed;
+            GetKeyLink.Visibility = Visibility.Collapsed;
         }
         else if (KeyStore.HasStoredKey())
         {
@@ -38,6 +47,22 @@ public sealed partial class ConsentWindow : Window
         }
         UpdateAccept();
     }
+
+    /// <summary>Welcome seen: remember it, then ask the AI question (or close if that was already answered).</summary>
+    private void OnWelcomeNext(object sender, RoutedEventArgs e)
+    {
+        _settings.WelcomeSeen = true;
+        _settings.Save();
+        if (_settings.AiConsentDecided) { Close(); return; }
+        Title = "huh: AI explanations";
+        WelcomePanel.Visibility = Visibility.Collapsed;
+        ConsentPanel.Visibility = Visibility.Visible;
+        if (Motion.Enabled) Motion.FadeIn(ConsentPanel, 160);
+    }
+
+    /// <summary>Opens Google AI Studio's key page in the browser (the user clicked the link).</summary>
+    private void OnGetKey(object sender, RoutedEventArgs e) =>
+        System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("https://aistudio.google.com/apikey") { UseShellExecute = true })?.Dispose();
 
     private void OnKeyChanged(object sender, RoutedEventArgs e) => UpdateAccept();
 
@@ -56,9 +81,10 @@ public sealed partial class ConsentWindow : Window
 
     private void Save(bool enabled)
     {
+        _settings.WelcomeSeen = true;
         _settings.AiConsentDecided = true;
         _settings.AiEnabled = enabled;
-        _settings.AiConsentAt = enabled ? DateTimeOffset.Now : null;
+        if (enabled) _settings.AiConsentAt = DateTimeOffset.Now; // kept after a later "off": re-enabling from Settings then needs no new consent
         _settings.Save();
         DevLog.Write($"AI consent: {(enabled ? "accepted" : "declined")}");
         Decided?.Invoke(enabled);

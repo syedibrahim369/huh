@@ -11,8 +11,20 @@ public sealed class ExplanationCache(string directory, TimeSpan? ttl = null)
 {
     private readonly TimeSpan _ttl = ttl ?? TimeSpan.FromDays(30);
 
-    public static string DefaultDirectory =>
-        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "huh", "cache", "ai");
+    public static string DefaultDirectory => Settings.HuhPaths.AiCache;
+
+    /// <summary>Number of saved answers (shown in Settings).</summary>
+    public int Count => Directory.Exists(directory) ? Directory.GetFiles(directory, "*.json").Length : 0;
+
+    /// <summary>Deletes every saved answer. Returns how many were removed.</summary>
+    public int Clear()
+    {
+        int n = 0;
+        if (!Directory.Exists(directory)) return 0;
+        foreach (var f in Directory.GetFiles(directory, "*.json"))
+            try { File.Delete(f); n++; } catch (IOException) { } catch (UnauthorizedAccessException) { }
+        return n;
+    }
 
     public Explanation? TryGet(string key, out string? model)
     {

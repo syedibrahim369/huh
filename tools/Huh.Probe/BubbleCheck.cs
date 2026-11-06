@@ -29,7 +29,7 @@ internal static class BubbleCheck
         Directory.CreateDirectory(outDir);
         foreach (var p in Process.GetProcessesByName("Huh")) { try { p.Kill(); p.WaitForExit(2000); } catch { } }
         // Readiness: the app logs "monitor started" once hooks + UIA are live.
-        string log = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "huh", "logs", "huh.log");
+        string log = Path.Combine(Huh.Core.Settings.HuhPaths.Logs, "huh.log");
         long logStart = File.Exists(log) ? new FileInfo(log).Length : 0;
         using var app = Process.Start(new ProcessStartInfo(appExe) { UseShellExecute = false })!;
         string? ready = null;
@@ -218,7 +218,7 @@ internal static class BubbleCheck
     /// </summary>
     public static int Snap(string outPath, int timeoutMs, int settleMs, bool waitAi = false, bool existing = false)
     {
-        string log = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "huh", "logs", "huh.log");
+        string log = Path.Combine(Huh.Core.Settings.HuhPaths.Logs, "huh.log");
         long start = existing ? 0 : File.Exists(log) ? new FileInfo(log).Length : 0; // --existing: the bubble already on screen
         var huh = Process.GetProcessesByName("Huh").FirstOrDefault();
         if (huh is null) { Console.Error.WriteLine("huh is not running"); return 2; }
@@ -394,6 +394,28 @@ internal static class BubbleCheck
         keybd_event(0x12 /*VK_MENU*/, 0, 0, 0);
         keybd_event(0x12, 0, 2 /*KEYUP*/, 0);
         SetForegroundWindow(hwnd);
+    }
+
+    /// <summary>
+    /// Screenshot of one window, cropped to its visible frame. Before copying, every point on an 8 px grid over the frame must
+    /// belong to that window (WindowFromPoint), so no other window's pixels can end up in the image. (PrintWindow can't be
+    /// used: WinUI content is composited and comes back black.)
+    /// </summary>
+    public static bool CaptureWindow(nint hwnd, string outPath)
+    {
+        if (CoreScreen.FrameBounds(hwnd) is not { } frame) return false;
+        for (int y = frame.Top + 1; y < frame.Bottom - 1; y += 8)
+            for (int x = frame.Left + 1; x < frame.Right - 1; x += 8)
+            {
+                var h = WindowFromPoint(new POINT { X = x, Y = y });
+                var root = h == 0 ? 0 : GetAncestor(h, 2 /* GA_ROOT */);
+                if (root != hwnd) { Console.Error.WriteLine($"not captured: another window ({Describe(root)}) covers ({x},{y})"); return false; }
+            }
+        using var bmp = new Bitmap(frame.Width, frame.Height, PixelFormat.Format32bppArgb);
+        using (var g = Graphics.FromImage(bmp)) g.CopyFromScreen(frame.Left, frame.Top, 0, 0, bmp.Size);
+        bmp.Save(outPath, ImageFormat.Png);
+        Console.WriteLine($"saved {outPath} ({bmp.Width}x{bmp.Height})");
+        return true;
     }
 
     private static string ClassOf(nint h) { var sb = new StringBuilder(256); GetClassNameW(h, sb, 256); return sb.ToString(); }

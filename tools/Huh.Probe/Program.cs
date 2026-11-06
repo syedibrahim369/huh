@@ -78,6 +78,25 @@ if (mode == "click" && Opt("--text") is { } clickText)
     return result.StartsWith("nothing", StringComparison.Ordinal) || result == "no visible bubble" ? 1 : 0;
 }
 
+if (mode == "capture" && Opt("--title") is { } capTitle)
+{
+    // Screenshot of ONE of huh's own windows (Settings, welcome) via PrintWindow: the window renders itself into a bitmap, so
+    // nothing else on the desktop can end up in the image, even if another window covers it.
+    var huhPids = Process.GetProcessesByName("Huh").Select(p => (uint)p.Id).ToHashSet();
+    nint target = 0;
+    Diag.EnumWindows((h, _) =>
+    {
+        Diag.GetWindowThreadProcessId(h, out var pid);
+        var t = new StringBuilder(512); Diag.GetWindowTextW(h, t, 512);
+        if (huhPids.Contains(pid) && Diag.IsWindowVisible(h) && t.ToString().Contains(capTitle, StringComparison.OrdinalIgnoreCase)) { target = h; return false; }
+        return true;
+    }, 0);
+    if (target == 0) { Console.Error.WriteLine($"no visible huh window titled '{capTitle}'"); return 1; }
+    var outPath = Opt("--out") ?? RepoPath("artifacts", "m6", "capture.png");
+    Directory.CreateDirectory(Path.GetDirectoryName(outPath)!);
+    return BubbleCheck.CaptureWindow(target, outPath) ? 0 : 1;
+}
+
 if (mode == "snap")
 {
     return BubbleCheck.Snap(Opt("--out") ?? RepoPath("artifacts", "m3", "snap.png"),

@@ -3,58 +3,114 @@
     x:Class="Huh.ConsentWindow"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-    Title="huh: AI explanations">
+    Title="huh">
 
     <Window.SystemBackdrop>
         <MicaBackdrop />
     </Window.SystemBackdrop>
 
-    <Grid x:Name="Root" Padding="28,24,28,20" RowSpacing="14">
-        <Grid.RowDefinitions>
-            <RowDefinition Height="Auto" />
-            <RowDefinition Height="*" />
-            <RowDefinition Height="Auto" />
-            <RowDefinition Height="Auto" />
-        </Grid.RowDefinitions>
+    <Grid>
+        <!-- Step 1 (first run only): what huh does, in three lines. -->
+        <Grid x:Name="WelcomePanel" Padding="28,28,28,20" RowSpacing="18" Visibility="Collapsed">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="*" />
+                <RowDefinition Height="Auto" />
+            </Grid.RowDefinitions>
 
-        <StackPanel Spacing="4">
-            <TextBlock Text="huh?" Style="{StaticResource CaptionTextBlockStyle}" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-            <TextBlock Text="Explain errors with AI?" Style="{StaticResource SubtitleTextBlockStyle}" />
-        </StackPanel>
-
-        <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
-            <StackPanel Spacing="12" Margin="0,0,8,0">
-                <TextBlock TextWrapping="Wrap" Style="{StaticResource BodyTextBlockStyle}"
-                           Text="huh already shows what it can work out on your PC: decoded error codes, which program raised the dialog, and whether it's signed. None of that leaves your PC." />
-                <TextBlock TextWrapping="Wrap" Style="{StaticResource BodyTextBlockStyle}"
-                           Text="If you turn on AI explanations, huh sends the dialog's text and those facts to Google Gemini to get a plain-English explanation and a suggested fix." />
-
-                <StackPanel Spacing="8" Padding="14,12" CornerRadius="8" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
-                            BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1">
-                    <TextBlock Text="What you should know" Style="{StaticResource BodyStrongTextBlockStyle}" />
-                    <TextBlock TextWrapping="Wrap" Text="• Before sending, huh removes your user name, your user-folder paths, your computer name and e-mail addresses." />
-                    <TextBlock TextWrapping="Wrap" Foreground="{ThemeResource SystemFillColorCautionBrush}"
-                               Text="• Google's free tier may use what is sent to improve its products. Leave this off if your error messages can contain confidential information." />
-                    <TextBlock TextWrapping="Wrap" Text="• No screenshots, ever: huh reads dialog text through Windows accessibility." />
-                    <TextBlock TextWrapping="Wrap" Text="• Suggested fixes come from a fixed list, are checked by huh, and always need your click." />
-                    <TextBlock TextWrapping="Wrap" Text="• Answers are cached on your PC, so the same error isn't sent twice." />
-                </StackPanel>
-
-                <StackPanel x:Name="KeyPanel" Spacing="6">
-                    <TextBlock Text="Gemini API key" Style="{StaticResource BodyStrongTextBlockStyle}" />
-                    <TextBlock x:Name="KeyStatus" TextWrapping="Wrap" Style="{StaticResource CaptionTextBlockStyle}"
+            <StackPanel Orientation="Horizontal" Spacing="14">
+                <Image Source="ms-appx:///Assets/huh-256.png" Width="44" Height="44" VerticalAlignment="Center" />
+                <StackPanel VerticalAlignment="Center">
+                    <TextBlock Text="Welcome to huh" Style="{StaticResource SubtitleTextBlockStyle}" />
+                    <TextBlock Text="For the error messages that leave you going “huh?”" Style="{StaticResource CaptionTextBlockStyle}"
                                Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-                    <PasswordBox x:Name="KeyBox" PlaceholderText="Paste your key (free at aistudio.google.com)" PasswordChanged="OnKeyChanged" />
                 </StackPanel>
             </StackPanel>
-        </ScrollViewer>
 
-        <TextBlock Grid.Row="2" TextWrapping="Wrap" Style="{StaticResource CaptionTextBlockStyle}" Foreground="{ThemeResource TextFillColorTertiaryBrush}"
-                   Text="You can change this later. Until you turn it on, nothing is sent anywhere." />
+            <StackPanel Grid.Row="1" Spacing="16" Margin="0,4,0,0">
+                <Grid ColumnSpacing="14">
+                    <Grid.ColumnDefinitions><ColumnDefinition Width="28" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
+                    <FontIcon Glyph="&#xE8BD;" FontSize="20" VerticalAlignment="Top" Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}" />
+                    <TextBlock Grid.Column="1" TextWrapping="Wrap" Style="{StaticResource BodyTextBlockStyle}"
+                               Text="When an error message pops up anywhere in Windows, huh slides a note out beside it." />
+                </Grid>
+                <Grid ColumnSpacing="14">
+                    <Grid.ColumnDefinitions><ColumnDefinition Width="28" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
+                    <FontIcon Glyph="&#xE90F;" FontSize="20" VerticalAlignment="Top" Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}" />
+                    <TextBlock Grid.Column="1" TextWrapping="Wrap" Style="{StaticResource BodyTextBlockStyle}"
+                               Text="It says what went wrong in plain English and offers a fix you can click. Nothing runs without your click." />
+                </Grid>
+                <Grid ColumnSpacing="14">
+                    <Grid.ColumnDefinitions><ColumnDefinition Width="28" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
+                    <FontIcon Glyph="&#xEA18;" FontSize="20" VerticalAlignment="Top" Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}" />
+                    <TextBlock Grid.Column="1" TextWrapping="Wrap" Style="{StaticResource BodyTextBlockStyle}"
+                               Text="It shows which program raised the error and whether it's signed, so fake “your PC is blocked” pop-ups stand out." />
+                </Grid>
 
-        <StackPanel Grid.Row="3" Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8">
-            <Button x:Name="DeclineButton" Content="Not now" Click="OnDecline" />
-            <Button x:Name="AcceptButton" Content="Turn on AI explanations" Style="{StaticResource AccentButtonStyle}" Click="OnAccept" />
-        </StackPanel>
+                <Border Padding="14,10" CornerRadius="8" Margin="0,8,0,0" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                        BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1">
+                    <TextBlock TextWrapping="Wrap" Style="{StaticResource CaptionTextBlockStyle}" Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                               Text="huh runs in the notification area (the ^ next to the clock). Right-click its icon to pause it, open Settings or quit." />
+                </Border>
+            </StackPanel>
+
+            <StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8">
+                <Button x:Name="WelcomeNext" Content="Next" Style="{StaticResource AccentButtonStyle}" MinWidth="96" Click="OnWelcomeNext" />
+            </StackPanel>
+        </Grid>
+
+        <!-- Step 2: the AI opt-in. -->
+        <Grid x:Name="ConsentPanel" Padding="28,24,28,20" RowSpacing="14">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="*" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+            </Grid.RowDefinitions>
+
+            <StackPanel Spacing="4">
+                <TextBlock Text="huh?" Style="{StaticResource CaptionTextBlockStyle}" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                <TextBlock Text="Explain errors with AI?" Style="{StaticResource SubtitleTextBlockStyle}" />
+            </StackPanel>
+
+            <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
+                <StackPanel Spacing="12" Margin="0,0,8,0">
+                    <TextBlock TextWrapping="Wrap" Style="{StaticResource BodyTextBlockStyle}"
+                               Text="huh already shows what it can work out on your PC: decoded error codes, which program raised the message, and whether it's signed. None of that leaves your PC." />
+                    <TextBlock TextWrapping="Wrap" Style="{StaticResource BodyTextBlockStyle}"
+                               Text="If you turn on AI explanations, huh sends the message's text and those facts to Google Gemini to get a plain-English explanation and a suggested fix." />
+
+                    <StackPanel Spacing="8" Padding="14,12" CornerRadius="8" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                                BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1">
+                        <TextBlock Text="What you should know" Style="{StaticResource BodyStrongTextBlockStyle}" />
+                        <TextBlock TextWrapping="Wrap" Foreground="{ThemeResource SystemFillColorCautionBrush}"
+                                   Text="• Google's free tier may use what is sent to improve its products, and people may review it. Leave this off if your error messages can contain confidential information." />
+                        <TextBlock TextWrapping="Wrap" Text="• Before sending, huh removes your user name, your user-folder paths, your computer name and e-mail addresses." />
+                        <TextBlock TextWrapping="Wrap" Text="• No screenshots, ever: huh reads message text through Windows accessibility." />
+                        <TextBlock TextWrapping="Wrap" Text="• Suggested fixes come from a fixed list, are checked by huh, and always need your click." />
+                        <TextBlock TextWrapping="Wrap" Text="• Answers are saved on your PC, so the same error isn't sent twice." />
+                    </StackPanel>
+
+                    <StackPanel x:Name="KeyPanel" Spacing="6">
+                        <TextBlock Text="Gemini API key" Style="{StaticResource BodyStrongTextBlockStyle}" />
+                        <TextBlock x:Name="KeyStatus" TextWrapping="Wrap" Style="{StaticResource CaptionTextBlockStyle}"
+                                   Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                        <PasswordBox x:Name="KeyBox" PlaceholderText="Paste your key" PasswordChanged="OnKeyChanged"
+                                     AutomationProperties.Name="Gemini API key" />
+                        <HyperlinkButton x:Name="GetKeyLink" Padding="0" Click="OnGetKey">
+                            <TextBlock Text="Get a free key at aistudio.google.com" Style="{StaticResource CaptionTextBlockStyle}" />
+                        </HyperlinkButton>
+                    </StackPanel>
+                </StackPanel>
+            </ScrollViewer>
+
+            <TextBlock Grid.Row="2" TextWrapping="Wrap" Style="{StaticResource CaptionTextBlockStyle}" Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                       Text="Until you turn it on, nothing is sent anywhere. You can change this any time: right-click huh's tray icon › Settings." />
+
+            <StackPanel Grid.Row="3" Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8">
+                <Button x:Name="DeclineButton" Content="Not now" Click="OnDecline" />
+                <Button x:Name="AcceptButton" Content="Turn on AI explanations" Style="{StaticResource AccentButtonStyle}" Click="OnAccept" />
+            </StackPanel>
+        </Grid>
     </Grid>
 </Window>

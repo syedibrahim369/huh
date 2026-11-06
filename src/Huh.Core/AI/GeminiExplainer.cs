@@ -19,18 +19,28 @@ public sealed class GeminiExplainer : IExplainer
 
     private readonly HttpClient _http;
     private readonly Func<string?> _key;
-    private readonly string[] _models;
+    private readonly Func<IReadOnlyList<string>> _models;
     private readonly TimeSpan _timeout;
 
-    public string Model => _models[0];
+    public string Model => _models() is { Count: > 0 } m ? m[0] : "?";
 
     /// <param name="models">Primary first; later ones are tried on 429 (separate quota) or 404 (model gone).</param>
     public GeminiExplainer(HttpClient http, Func<string?> keyProvider, IReadOnlyList<string> models, TimeSpan? timeout = null)
     {
         _http = http;
         _key = keyProvider;
-        _models = models.Count > 0 ? models.ToArray() : throw new ArgumentException("no model", nameof(models));
+        var fixedModels = models.Count > 0 ? models.ToArray() : throw new ArgumentException("no model", nameof(models));
+        _models = () => fixedModels;
         _timeout = timeout ?? TimeSpan.FromSeconds(8); // per model; primary + fallback stays well under 20 s
+    }
+
+    /// <param name="models">Read on every call, so a model changed in Settings applies to the next request.</param>
+    public GeminiExplainer(HttpClient http, Func<string?> keyProvider, Func<IReadOnlyList<string>> models, TimeSpan? timeout = null)
+    {
+        _http = http;
+        _key = keyProvider;
+        _models = models;
+        _timeout = timeout ?? TimeSpan.FromSeconds(8);
     }
 
     public async Task<AiOutcome> ExplainAsync(ExplainRequest request, CancellationToken ct)
@@ -40,7 +50,9 @@ public sealed class GeminiExplainer : IExplainer
 
         var sw = Stopwatch.StartNew();
         AiOutcome last = new(AiStatus.Unavailable, Reason: UnavailableReason.Service);
-        foreach (var model in _models)
+        var models = _models().Where(Settings.HuhSettings.IsValidModelName).ToArray();
+        if (models.Length == 0) return new AiOutcome(AiStatus.Unavailable, Reason: UnavailableReason.ModelUnavailable, Detail: "no valid model name");
+        foreach (var model in models)
         {
             last = await CallAsync(model, key, request, ct).ConfigureAwait(false);
             last = last with { LatencyMs = sw.Elapsed.TotalMilliseconds, Model = model };
@@ -54,7 +66,7 @@ public sealed class GeminiExplainer : IExplainer
     {
         using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
         cts.CancelAfter(_timeout);
-        using var msg = new HttpRequestMessage(HttpMethod.Post, Endpoint + Uri.EscapeDataString(model) + ":generateContent")
+        using var msg = new HttpRequestMessage(HttpMethod.Post, UrlFor(model))
         {
             Content = new StringContent(BuildBody(request, model), Encoding.UTF8, "application/json"),
         };
@@ -90,7 +102,10 @@ public sealed class GeminiExplainer : IExplainer
         }
     }
 
-    internal static string BuildBody(ExplainRequest request, string model)
+    public static string UrlFor(string model) => Endpoint + Uri.EscapeDataString(model) + ":generateContent";
+
+    /// <summary>The exact request body huh sends (also used by the Settings privacy preview, so the preview can't drift).</summary>
+    public static string BuildBody(ExplainRequest request, string model)
     {
         var generation = new JsonObject
         {

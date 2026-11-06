@@ -7,7 +7,9 @@ Living log of decisions, gotchas and what's left. Newest decisions at the bottom
 src/Huh.App          WinUI 3 tray app + bubble (assembly "Huh", namespace "Huh")
 src/Huh.Core         UI-free: detection, dialog model, decoding, provenance, AI, privacy, actions
 tools/Huh.TestHarness  raises error / non-error dialogs on demand (console, comctl32 v6 manifest)
-tools/Huh.Probe      headless host for Core detection; JSONL log + harness scoring
+tools/Huh.Probe      headless host for Core detection; JSONL log + harness scoring + verified screenshots
+tools/icons          make-icons.ps1 (huh.ico, huh-paused.ico, huh-256.png)
+docs/                reports/ (M1-M4 numbers), images/ (README screenshots), demo-script.md
 tests/Huh.Tests      xUnit v3 (Microsoft.Testing.Platform runner)
 ```
 
@@ -140,6 +142,47 @@ tests/Huh.Tests      xUnit v3 (Microsoft.Testing.Platform runner)
 - Gotchas: a dialog that huh's cleanup fails to close keeps its bubble (correct), which can cover the next test bubble; close
   dialogs by HWND, not by title. A normal-rights shell can't read an elevated process's command line (WMI shows it empty).
 
+### M6 polish (2026-11-07)
+- **Tray** (`Core/Windowing/TrayIcon.cs`): raw Shell_NotifyIcon, NOTIFYICON_VERSION_4, hand-written blittable P/Invoke +
+  `[UnmanagedCallersOnly]` window proc. Hidden WS_POPUP window (not message-only: those miss the "TaskbarCreated" broadcast
+  sent when Explorer restarts). Menu: status line, Pause, AI explanations, Start with Windows, Settings (default), Quit.
+  Left click = Settings. Dark native menus via undocumented uxtheme ordinals 135/136 (harmless if missing). Paused icon variant.
+- **Single instance**: named mutex `Local\huh-<hash of data dir>`; a second launch posts WM_APP+2 to the tray window ("open
+  Settings") and exits. Keyed by data dir so a HUH_DATA_DIR test instance can run beside the real one.
+- **Pause** is in memory only (restart = watching again). Paused => detections ignored, open bubbles closed, grey icon.
+- **Start with Windows**: HKCU Run value `huh` = `"<exe>"` (no admin). Task Manager's StartupApproved\Run "disabled" counts as
+  off; enabling from huh clears it. Off by default. If the registered exe no longer exists (zip moved), startup repoints it;
+  a registered exe that still exists is left alone (could be the copy the user wants).
+- **Settings window** (Mica, content extended into the title bar): watch/pause, startup, AI on/off (turning on needs the
+  consent screen unless accepted before and a key exists), provider (Gemini; Ollama listed disabled as "coming later"),
+  model + fallback (editable, validated `^[a-z0-9][a-z0-9.\-]*$`, max 64: the name goes into the URL path), API key
+  replace/remove (DPAPI), excluded apps (picked from recently seen apps), privacy section, about.
+- **Exclusions** key = exe name; for csrss hard errors the program the error is *about*; for web pages the browser.
+  Snapshot `HashSet` read on the worker thread, swapped on the UI thread. Recently seen apps: 15, exe + name + date, local.
+- **Privacy preview** (`RequestPreview`): URL + headers (key shown as a placeholder) + pretty JSON body built by the same
+  `Prompt.Build` + `GeminiExplainer.BuildBody` as a real request; unit test asserts JsonNode.DeepEquals with what the fake
+  HTTP handler received. Sources: a sample dialog using the user's real profile path (shows redaction) or the last dialog.
+- **First run**: welcome step (3 lines + tray hint) in `ConsentWindow`, then the AI question. Users who decided before M6
+  count as having seen the welcome. Consent copy: free-tier note moved to the top of the list, "change it any time: tray ›
+  Settings", a "Get a free key" link. `AiConsentAt` is now kept after turning AI off (re-enabling needs no new consent).
+- **Pre-warm**: at startup, facts pipeline on a sample (WinVerifyTrust embedded + catalog, FormatMessage, prompt) on a pool
+  thread, then one bubble for `SampleFacts` built, DWM-cloaked, moved off-screen, shown, rendered for 3 frames, closed.
+  Release build, 6 runs each (screen locked): first bubble's first frame median ~375 ms with pre-warm vs ~670 ms without;
+  later bubbles ~285 ms. Outliers ~770 ms in 2/6 pre-warmed runs (one: the dialog's own app was slow, 570 ms detection; one
+  unexplained, 470 ms between show and first frame).
+- **Motion** (`Motion.cs`): entrance = 14 DIP slide from the dialog's side + fade (220/160 ms, cubic ease-out, compositor
+  properties only), AI panel / confirmation fade-in, 120 ms fade-out on close. All skipped when `UISettings.AnimationsEnabled`
+  is false (Settings › Accessibility › Visual effects › Animation effects). `HUH_ANIMATIONS=0|1` overrides for testing.
+- **Release**: `dotnet publish -c Release -p:Platform=x64 -p:PublishProfile=win-x64` (self-contained, trimmed, R2R).
+  Only `Microsoft.WindowsAppSDK.WinUI` + `.Runtime` are referenced (the metapackage added ONNX Runtime, DirectML, Search,
+  Widgets: 156 MB -> 95 MB, zip 39 MB). No PDBs in Release; scanned all 308 files for user name / e-mail / computer name.
+- **Icons**: `tools/icons/make-icons.ps1` (System.Drawing) writes huh.ico, huh-paused.ico (PNG entries 16-256) and huh-256.png.
+- **Screenshots** for the README in `docs/images/`: reused M3-M5 crops; the Windows user name in the two path screenshots replaced by
+  `<you>` drawn in Cascadia Mono on the exact character cells. Dropped a crop that had 1-2 px slivers of the desktop.
+- **Probe**: `capture --title X` screenshots one of huh's own windows after verifying (8 px grid, WindowFromPoint) that no
+  other window covers it; refuses otherwise (it refused while the screen was locked: LockScreenBackstopFrame).
+- **Detection regression after M6** (screen locked): 30/30, 0/6 FP, p50 175 ms.
+
 ## Gotchas
 - `SupportedOSPlatformVersion` can't be set globally: `net10.0-windows` has TargetPlatformVersion 7.0 (NETSDK1135).
 - .NET 10 SDK: `dotnet test` needs `"test": {"runner": "Microsoft.Testing.Platform"}` in global.json for xUnit v3; use `dotnet test --project ...`.
@@ -192,6 +235,17 @@ tests/Huh.Tests      xUnit v3 (Microsoft.Testing.Platform runner)
 - PowerShell passes `$null` as "" to string P/Invoke parameters (FindWindow(null, title) needs [NullString]::Value).
 - Fixture JSON with nested JSON strings: generate with a serializer, never hand-escape (raw control chars, `\D`).
 - Harness `run` scenarios that spawn helpers (rundll32/regsvr32/msiexec) report the helper's process; the probe matches by name.
+- **PrintWindow returns black for WinUI 3 content** (composited); screenshots of huh's windows must come from the screen,
+  after verifying nothing covers them.
+- **CsWinRT needs `partial` on classes deriving from WinRT types** (our `SystemBackdrop` subclass): without it the trimmed
+  Release build throws InvalidCastException in `set_SystemBackdrop`. Debug builds work, so test the published build.
+- **ILLink writes its output PDB's full path (`obj\...\linked\Huh.pdb`) into the binary even with PathMap**: the user name
+  leaks into release DLLs. Release uses `DebugType=none`.
+- The Microsoft.WindowsAppSDK metapackage pulls ~60 MB of AI/ML runtimes into a self-contained build; reference components.
+- First launch of freshly built/extracted binaries takes 11-40 s to reach OnLaunched (Defender scanning ~300 files); the
+  second launch of the Release build starts in ~270 ms.
+- PowerShell: `Get-ChildItem <dir> -File -Exclude x` without `-Recurse` matches nothing (a "clean" scan that scanned no files).
+  The tool's guard blocks any command containing `Remove-Item` plus a C:\ path, and also misreads robocopy's `/E` as a path.
 
 ## Milestones
 - [x] M0 Setup
@@ -200,7 +254,7 @@ tests/Huh.Tests      xUnit v3 (Microsoft.Testing.Platform runner)
 - [x] M3 Deterministic decoding
 - [x] M4 AI explanation (opt-in)
 - [x] M5 Fix actions (on-screen checks done 2026-11-06, see "M5 on-screen results")
-- [ ] M6 Polish
+- [ ] M6 Polish (code, release zip, README, demo script done; on-screen checks of the new windows pending: screen was locked)
 
 ## Left / ideas
 - Localized dialogs: text cues are English-only. MessageBoxes are covered by the icon signal; TaskDialogs are not.
@@ -208,9 +262,7 @@ tests/Huh.Tests      xUnit v3 (Microsoft.Testing.Platform runner)
 - Deterministic "use the dialog's Continue button" tip only shows when the AI suggested a rejected re-run; could also show it
   whenever a system process's dialog has a Continue/Retry button (the AI currently says this in its steps anyway).
 - Search was verified up to the confirmation (then cancelled) so nothing opened in the user's browser; execution is unit-tested.
-- README (M6): describe the AI-keyword injection check honestly as one layer; the real protection is the allowlist,
-  parameter validation and the user's click.
-- M6: pre-warm XAML at startup (first bubble is slow); single-instance; tray icon to quit (today: kill the process).
+- Roadmap: local Ollama provider behind `IExplainer` (out of scope for 1.0); code signing; MSIX/winget.
 - M2 follow-ups: real mixed-DPI test when a second monitor is available; WM_DPICHANGED re-place is untested.
 - Harness/probe: `dotnet build` both, then `tools/Huh.Probe/bin/Debug/net10.0-windows/Huh.Probe.exe score` (`--verbose` dumps UIA trees).
 - Check Gemini free-tier RPM/RPD on https://aistudio.google.com/rate-limit (login required).
