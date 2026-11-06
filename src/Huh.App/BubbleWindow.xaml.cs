@@ -7,6 +7,7 @@ using Huh.Core.Windowing;
 using Microsoft.UI.Text;
 using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
+using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Documents;
 using Microsoft.UI.Xaml.Media;
@@ -30,6 +31,8 @@ public sealed partial class BubbleWindow : Window
     public event Action<BubbleWindow>? Dismissed;
 
     private readonly WindowFollower _follower;
+    private readonly Huh.Core.Actions.FixActionRunner _runner;
+    private readonly Huh.Core.Privacy.Redactor _redactor;
     private readonly Microsoft.UI.Dispatching.DispatcherQueueTimer _restack;
     private bool _hidden;
     private double _lastHeightDip;
@@ -41,11 +44,14 @@ public sealed partial class BubbleWindow : Window
         GlyphWarning = 0xE7BA, GlyphError = 0xE783, GlyphUnknown = 0xE9CE, GlyphStore = 0xE719, GlyphWindows = 0xE770,
         GlyphGlobe = 0xE774, GlyphChevronDown = 0xE70D, GlyphChevronUp = 0xE70E;
 
-    internal BubbleWindow(DialogFacts facts)
+    internal BubbleWindow(DialogFacts facts, Huh.Core.Privacy.Redactor redactor)
     {
         Facts = facts;
+        _redactor = redactor;
         InitializeComponent();
         Hwnd = WindowNative.GetWindowHandle(this);
+        // Side effects go through a launcher owned by this bubble (UAC prompts attach to it).
+        _runner = new Huh.Core.Actions.FixActionRunner(new WinAppLauncher(Hwnd, DispatcherQueue), redactor);
 
         var presenter = OverlappedPresenter.Create();
         presenter.IsResizable = false;
@@ -61,6 +67,7 @@ public sealed partial class BubbleWindow : Window
             Root.RequestedTheme = t;
         SystemBackdrop = new AlwaysActiveAcrylic();
         Bind(facts);
+        BuildManualActions();
         if (Environment.GetEnvironmentVariable("HUH_EXPAND_DETAILS") == "1") SetDetailsExpanded(true);
 
         // Created before anything that can call Reposition() (which may start it).
@@ -297,7 +304,7 @@ public sealed partial class BubbleWindow : Window
     private void SetDetailsExpanded(bool expanded)
     {
         DetailsPanel.Visibility = expanded ? Visibility.Visible : Visibility.Collapsed;
-        DetailsToggleText.Text = expanded ? "Hide details" : "Show details";
+        DetailsToggleText.Text = expanded ? "Hide details" : "Details";
         DetailsChevron.Glyph = G(expanded ? GlyphChevronUp : GlyphChevronDown);
         // Height changes -> Root.SizeChanged -> Reposition() (may flip sides if it no longer fits).
     }
@@ -361,23 +368,23 @@ public sealed partial class BubbleWindow : Window
 
         if (o.Action?.Action is { } a)
         {
-            AiActionText.Text = a.Label + (a.RequiresOverride ? " (unsigned program: blocked unless you override)" : "");
-            AiActionText.Foreground = Brush(a.RequiresOverride ? "SystemFillColorCriticalBrush" : "TextFillColorPrimaryBrush");
-            AiActionIcon.Glyph = G(a.Id switch
-            {
-                Huh.Core.Actions.FixActionId.OpenSettings => GlyphSettings,
-                Huh.Core.Actions.FixActionId.OpenFolder => GlyphFolder,
-                Huh.Core.Actions.FixActionId.RerunAsAdmin => GlyphAdmin,
-                Huh.Core.Actions.FixActionId.CopyErrorText => GlyphCopy,
-                _ => GlyphSearch,
-            });
+            _aiAction = a;
+            AiActionText.Text = a.Label + "…";
+            AiActionIcon.Glyph = G(IconFor(a.Id));
             AiActionChip.Visibility = Visibility.Visible;
-            ToolTipService.SetToolTip(AiActionChip, "Suggested fix. One-click actions arrive in the next milestone; huh will always ask first.");
+            ToolTipService.SetToolTip(AiActionChip, "Suggested fix, checked by huh. You'll see exactly what happens before anything happens.");
         }
         else if (o.SuspectedInjection)
         {
             AiNote.Text = "Treat the advice above with suspicion. Real error messages don't address AI tools, so huh offers no one-click action here.";
             AiNote.Foreground = Brush("SystemFillColorCautionBrush");
+            AiNote.Visibility = Visibility.Visible;
+        }
+        else if (o.Action?.Hint is { } hint)
+        {
+            // e.g. re-run rejected for a Windows process: point at the dialog's own button instead.
+            AiNote.Text = "Tip: " + hint;
+            AiNote.Foreground = Brush("TextFillColorPrimaryBrush");
             AiNote.Visibility = Visibility.Visible;
         }
         else if (o.Action?.RejectedReason is { } why)
@@ -419,6 +426,141 @@ public sealed partial class BubbleWindow : Window
     private bool _aiDetailsAdded;
 
     private void OnAiOptIn(object sender, RoutedEventArgs e) => AiOptInRequested?.Invoke(this);
+
+    // ------------------------------------------------------------------ actions (M5): click -> confirmation -> run
+
+    private Huh.Core.Actions.ValidatedAction? _aiAction;
+    private Huh.Core.Actions.ValidatedAction? _pending;
+
+    private static int IconFor(Huh.Core.Actions.FixActionId id) => id switch
+    {
+        Huh.Core.Actions.FixActionId.OpenSettings => GlyphSettings,
+        Huh.Core.Actions.FixActionId.OpenFolder => GlyphFolder,
+        Huh.Core.Actions.FixActionId.RerunAsAdmin => GlyphAdmin,
+        Huh.Core.Actions.FixActionId.CopyErrorText => GlyphCopy,
+        _ => GlyphSearch,
+    };
+
+    /// <summary>Always-available actions (no AI needed): Copy, Search, and Run as admin when eligible (unsigned => red override).</summary>
+    private void BuildManualActions()
+    {
+        foreach (var a in Huh.Core.Actions.FixActions.ManualActions(Facts, _redactor))
+        {
+            var label = a.Id switch
+            {
+                Huh.Core.Actions.FixActionId.CopyErrorText => "Copy",
+                Huh.Core.Actions.FixActionId.SearchWeb => "Search",
+                Huh.Core.Actions.FixActionId.RerunAsAdmin => "Run as admin…",
+                _ => a.Label,
+            };
+            var link = new HyperlinkButton
+            {
+                Padding = new Thickness(6, 2, 6, 2),
+                Content = new TextBlock { Text = label, Style = (Style)Application.Current.Resources["CaptionTextBlockStyle"] },
+            };
+            if (a.RequiresOverride) link.Foreground = Brush("SystemFillColorCriticalBrush");
+            ToolTipService.SetToolTip(link, a.Label + (a.RequiresOverride ? " (unsigned: needs your explicit confirmation)" : ""));
+            AutomationProperties.SetName(link, a.Label);
+            var action = a;
+            link.Click += (_, _) => Request(action);
+            ManualActions.Children.Add(link);
+        }
+    }
+
+    private void OnAiAction(object sender, RoutedEventArgs e) { if (_aiAction is not null) Request(_aiAction); }
+
+    /// <summary>Copy runs at once; everything else shows the confirmation with exactly what will happen.</summary>
+    private void Request(Huh.Core.Actions.ValidatedAction a)
+    {
+        if (!a.RequiresConfirmation) { Execute(a, acknowledgedUnsigned: false); return; }
+        _pending = a;
+        var c = Huh.Core.Actions.Confirmations.For(a, Facts);
+        ConfirmTitle.Text = c.Title;
+        ConfirmDetails.Children.Clear();
+        foreach (var (label, value) in c.Details)
+        {
+            var t = new TextBlock { TextWrapping = TextWrapping.Wrap, FontSize = 12 };
+            t.Inlines.Add(new Run { Text = label + ": ", FontWeight = FontWeights.SemiBold });
+            bool mono = label is "Path" or "Folder" or "Opens";
+            t.Inlines.Add(new Run { Text = value, FontFamily = mono ? new FontFamily("Cascadia Mono, Consolas") : FontFamily.XamlAutoFontFamily });
+            if (c.Danger && label is "Path" or "Publisher") t.Foreground = Brush("SystemFillColorCriticalBrush");
+            ConfirmDetails.Children.Add(t);
+        }
+        ConfirmNote.Text = c.Note ?? "";
+        ConfirmGo.Content = c.ConfirmText;
+
+        ConfirmAck.IsChecked = false;
+        ConfirmAck.Visibility = c.AcknowledgeText is null ? Visibility.Collapsed : Visibility.Visible;
+        ConfirmAckText.Text = c.AcknowledgeText ?? "";
+        ConfirmGo.IsEnabled = c.AcknowledgeText is null; // the deliberate second step for the unsigned override
+
+        if (c.Danger)
+        {
+            ConfirmPanel.Background = Brush("SystemFillColorCriticalBackgroundBrush");
+            ConfirmPanel.BorderBrush = Brush("SystemFillColorCriticalBrush");
+            ConfirmPanel.BorderThickness = new Thickness(2);
+            ConfirmTitle.Foreground = Brush("SystemFillColorCriticalBrush");
+            SetIcon(ConfirmIcon, GlyphWarningFull, "SystemFillColorCriticalBrush");
+            ConfirmGo.Style = (Style)Application.Current.Resources["DefaultButtonStyle"];
+            ConfirmGo.Foreground = Brush("SystemFillColorCriticalBrush");
+        }
+        else
+        {
+            ConfirmPanel.Background = Brush("ControlFillColorDefaultBrush");
+            ConfirmPanel.BorderBrush = Brush("ControlStrokeColorDefaultBrush");
+            ConfirmPanel.BorderThickness = new Thickness(1);
+            ConfirmTitle.Foreground = Brush("TextFillColorPrimaryBrush");
+            SetIcon(ConfirmIcon, IconFor(a.Id), "AccentTextFillColorPrimaryBrush");
+            ConfirmGo.Style = (Style)Application.Current.Resources["AccentButtonStyle"];
+            ConfirmGo.ClearValue(Control.ForegroundProperty);
+        }
+        ActionResult.Visibility = Visibility.Collapsed;
+        ConfirmPanel.Visibility = Visibility.Visible; // height changes -> Reposition()
+    }
+
+    private void OnAckChanged(object sender, RoutedEventArgs e) => ConfirmGo.IsEnabled = ConfirmAck.IsChecked == true;
+
+    private void OnConfirmCancel(object sender, RoutedEventArgs e)
+    {
+        _pending = null;
+        ConfirmPanel.Visibility = Visibility.Collapsed;
+    }
+
+    private void OnConfirmGo(object sender, RoutedEventArgs e)
+    {
+        if (_pending is not { } a) return;
+        bool ack = ConfirmAck.Visibility == Visibility.Visible && ConfirmAck.IsChecked == true;
+        _pending = null;
+        ConfirmPanel.Visibility = Visibility.Collapsed;
+        Execute(a, ack);
+    }
+
+    private void Execute(Huh.Core.Actions.ValidatedAction a, bool acknowledgedUnsigned)
+    {
+        ShowResult("Working…", "TextFillColorSecondaryBrush");
+        DevLog.Write($"bubble 0x{Hwnd:X}: action {a.Id} requested (override={a.RequiresOverride}, ack={acknowledgedUnsigned})");
+        var facts = Facts;
+        // Off the UI thread: the UAC prompt blocks ShellExecute until the user answers.
+        _ = Task.Run(() => _runner.Run(a, facts, acknowledgedUnsigned)).ContinueWith(t =>
+        {
+            var o = t.IsCompletedSuccessfully ? t.Result
+                : new Huh.Core.Actions.RunOutcome(Huh.Core.Actions.RunResult.Failed, "Something went wrong.");
+            DevLog.Write($"bubble 0x{Hwnd:X}: action {a.Id} -> {o.Result}");
+            DispatcherQueue.TryEnqueue(() => ShowResult(o.Message, o.Result switch
+            {
+                Huh.Core.Actions.RunResult.Done => "SystemFillColorSuccessBrush",
+                Huh.Core.Actions.RunResult.Cancelled => "TextFillColorSecondaryBrush",
+                _ => "SystemFillColorCautionBrush",
+            }));
+        }, TaskScheduler.Default);
+    }
+
+    private void ShowResult(string text, string brush)
+    {
+        ActionResult.Text = text;
+        ActionResult.Foreground = Brush(brush);
+        ActionResult.Visibility = Visibility.Visible;
+    }
 
     // ------------------------------------------------------------------ helpers
 

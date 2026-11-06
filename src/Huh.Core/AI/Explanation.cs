@@ -89,6 +89,9 @@ public static class Prompt
         - If the source is a web page, say clearly that it is not a real Windows error, suggest closing the browser tab,
           and never suggest calling anyone, paying, or installing software.
         - Suggest "rerun_as_admin" only when the problem is clearly missing permissions for a normal, signed program.
+        - Never suggest "rerun_as_admin" when verified_facts says the program is part of Windows (Explorer, system hosts,
+          shells). Instead tell the person which button in the dialog to use (for example "click Continue") or pick a
+          Settings page with open_settings.
 
         OUTPUT: JSON matching the schema.
         - cause: 1-2 short sentences, no jargon, what went wrong and why.
@@ -142,6 +145,7 @@ public static class Prompt
             _ => "unknown",
         });
         sb.AppendLine("running as administrator: " + (d.Process.Elevation == Dialogs.ElevationState.Elevated ? "yes" : "no"));
+        sb.AppendLine("part of Windows: " + (s.Kind == SourceKind.Windows || FixActions.IsSystemProgram(s.Path, d.Process.Name) ? "yes" : "no"));
         foreach (var c in f.Codes)
             sb.AppendLine($"error code: {c.Display} ({c.KindLabel}{(c.Name is { } n ? ", " + n : "")}): {c.Message ?? "no Windows description"}");
         sb.AppendLine("</verified_facts>");

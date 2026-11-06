@@ -109,6 +109,24 @@ tests/Huh.Tests      xUnit v3 (Microsoft.Testing.Platform runner)
   consent untouched. Bubble checks run with HUH_AI_FAKE=1 so they don't spend quota.
 - Results: `docs/reports/m4-ai.md` (live latency 2.1-4.1 s on the primary; cache hit 38 ms).
 
+### M5 fix actions (code done; on-screen checks pending, see "Left")
+- Flow: suggested-fix button (AI) or always-available links (Copy / Search / Run as admin…) -> inline confirmation that shows
+  exactly what will happen (`Confirmations.For`: page name + URI, full folder path, query, program + full path + publisher +
+  "Arguments: none") -> `FixActionRunner` -> `IActionLauncher` (`WinAppLauncher` in the app). Copy runs without confirmation.
+- Unsigned re-run: never suggested by the AI; user-initiated only. Red panel (path + "UNSIGNED"), checkbox
+  "I understand this program is unsigned" must be ticked before the button enables; the runner refuses without the ack.
+- Windows shell/system processes are never re-run (explorer, csrss, dllhost, rundll32, svchost, conhost, powershell, cmd,
+  msiexec, ... and anything under %SystemRoot%). The decision carries a hint pointing at the dialog's own button
+  ("Use the dialog's own "Continue" button"); the prompt tells the model "part of Windows: yes" and to suggest that instead.
+- Click-time re-checks (TOCTOU): settings key still on the list, folder still a folder, exe path unchanged, signature and
+  signer unchanged (re-verified with WinVerifyTrust), eligibility re-evaluated. UAC "No" (Win32 1223) => "Cancelled".
+- Launcher guards: OpenUri only `ms-settings:`/`https:`; folders open via `explorer.exe <folder>` (ArgumentList, no shell
+  verb on the path); runas sets WorkingDirectory only, never Arguments, owner = bubble HWND. Search = Bing with a query built
+  by huh from redacted facts.
+- Changing the system prompt changes the cache key, so earlier cached answers are not reused (next live run = fresh calls).
+- Tests: `ActionTests` (every action's validation, system-process denylist, confirmations, runner incl. forged actions,
+  folder->file swap, unsigned ack, signature change, UAC cancel, injection cases). 207 tests total.
+
 ## Gotchas
 - `SupportedOSPlatformVersion` can't be set globally: `net10.0-windows` has TargetPlatformVersion 7.0 (NETSDK1135).
 - .NET 10 SDK: `dotnet test` needs `"test": {"runner": "Microsoft.Testing.Platform"}` in global.json for xUnit v3; use `dotnet test --project ...`.
@@ -168,12 +186,18 @@ tests/Huh.Tests      xUnit v3 (Microsoft.Testing.Platform runner)
 - [x] M2 Bubble (mixed-DPI covered by unit tests only)
 - [x] M3 Deterministic decoding
 - [x] M4 AI explanation (opt-in)
-- [ ] M5 Fix actions
+- [~] M5 Fix actions (code + unit tests done; on-screen checks pending)
 - [ ] M6 Polish
 
 ## Left / ideas
 - Localized dialogs: text cues are English-only. MessageBoxes are covered by the icon signal; TaskDialogs are not.
 - Chromium/Edge in-page `alert()` and XAML ContentDialogs: UIA element path exists (IsDialog) but is not in the harness yet.
+- **M5 on-screen checks (pending, user screen locked):** screenshots of the suggested-fix button + confirmation for each action
+  type; red unsigned panel with the checkbox (button disabled until ticked); click-through of Open Settings / Open folder /
+  Search / Copy; Explorer System32 copy => "Use the dialog's own Continue button" hint; UAC test elevating ONLY the harness's
+  own unsigned exe, after asking the user.
+- README (M6): describe the AI-keyword injection check honestly as one layer; the real protection is the allowlist,
+  parameter validation and the user's click.
 - M6: pre-warm XAML at startup (first bubble is slow); single-instance; tray icon to quit (today: kill the process).
 - M2 follow-ups: real mixed-DPI test when a second monitor is available; WM_DPICHANGED re-place is untested.
 - Harness/probe: `dotnet build` both, then `tools/Huh.Probe/bin/Debug/net10.0-windows/Huh.Probe.exe score` (`--verbose` dumps UIA trees).

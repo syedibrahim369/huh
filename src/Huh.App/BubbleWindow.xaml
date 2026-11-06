@@ -14,6 +14,7 @@
             <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
 
         <!-- Header: severity glyph, brand, dismiss -->
@@ -60,14 +61,13 @@
             </Grid>
             <TextBlock x:Name="AiCause" TextWrapping="Wrap" Visibility="Collapsed" Style="{StaticResource BodyTextBlockStyle}" />
             <StackPanel x:Name="AiSteps" Spacing="3" Visibility="Collapsed" />
-            <Border x:Name="AiActionChip" Visibility="Collapsed" CornerRadius="4" Padding="8,4" HorizontalAlignment="Left"
-                    BorderThickness="1" BorderBrush="{ThemeResource ControlStrokeColorDefaultBrush}"
-                    Background="{ThemeResource ControlFillColorDefaultBrush}">
+            <!-- Suggested fix: a button. Clicking it never acts directly; it opens the confirmation below. -->
+            <Button x:Name="AiActionChip" Visibility="Collapsed" Padding="8,4" HorizontalAlignment="Left" Click="OnAiAction">
                 <StackPanel Orientation="Horizontal" Spacing="6">
                     <FontIcon x:Name="AiActionIcon" FontSize="12" Glyph="&#xE90F;" />
                     <TextBlock x:Name="AiActionText" FontSize="12" TextWrapping="Wrap" MaxWidth="250" />
                 </StackPanel>
-            </Border>
+            </Button>
             <TextBlock x:Name="AiNote" TextWrapping="Wrap" Visibility="Collapsed" Style="{StaticResource CaptionTextBlockStyle}"
                        Foreground="{ThemeResource TextFillColorTertiaryBrush}" />
             <HyperlinkButton x:Name="AiOptIn" Visibility="Collapsed" Padding="0" Click="OnAiOptIn">
@@ -75,8 +75,32 @@
             </HyperlinkButton>
         </StackPanel>
 
+        <!-- Confirmation: shows exactly what will happen before anything happens. Red + checkbox for the unsigned override. -->
+        <StackPanel x:Name="ActionArea" Grid.Row="4" Spacing="6" Margin="0,0,8,0">
+            <Border x:Name="ConfirmPanel" Visibility="Collapsed" CornerRadius="6" Padding="12,10" BorderThickness="1"
+                    BorderBrush="{ThemeResource ControlStrokeColorDefaultBrush}" Background="{ThemeResource ControlFillColorDefaultBrush}">
+                <StackPanel Spacing="6">
+                    <StackPanel Orientation="Horizontal" Spacing="6">
+                        <FontIcon x:Name="ConfirmIcon" FontSize="14" Glyph="&#xE946;" VerticalAlignment="Top" Margin="0,2,0,0" />
+                        <TextBlock x:Name="ConfirmTitle" Style="{StaticResource BodyStrongTextBlockStyle}" TextWrapping="Wrap" MaxWidth="270" />
+                    </StackPanel>
+                    <StackPanel x:Name="ConfirmDetails" Spacing="3" />
+                    <TextBlock x:Name="ConfirmNote" TextWrapping="Wrap" Style="{StaticResource CaptionTextBlockStyle}"
+                               Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                    <CheckBox x:Name="ConfirmAck" Visibility="Collapsed" Checked="OnAckChanged" Unchecked="OnAckChanged">
+                        <TextBlock x:Name="ConfirmAckText" TextWrapping="Wrap" FontSize="12" />
+                    </CheckBox>
+                    <StackPanel Orientation="Horizontal" Spacing="8" HorizontalAlignment="Right">
+                        <Button x:Name="ConfirmCancel" Content="Cancel" Click="OnConfirmCancel" />
+                        <Button x:Name="ConfirmGo" Style="{StaticResource AccentButtonStyle}" Click="OnConfirmGo" />
+                    </StackPanel>
+                </StackPanel>
+            </Border>
+            <TextBlock x:Name="ActionResult" Visibility="Collapsed" TextWrapping="Wrap" Style="{StaticResource CaptionTextBlockStyle}" />
+        </StackPanel>
+
         <!-- Where it came from + trust badge -->
-        <Grid Grid.Row="4" Margin="0,2,8,0" Padding="0,8,0,0" ColumnSpacing="8" BorderThickness="0,1,0,0"
+        <Grid Grid.Row="5" Margin="0,2,8,0" Padding="0,8,0,0" ColumnSpacing="8" BorderThickness="0,1,0,0"
               BorderBrush="{ThemeResource DividerStrokeColorDefaultBrush}">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="Auto" />
@@ -90,15 +114,18 @@
             </StackPanel>
         </Grid>
 
-        <!-- Expand / collapse full details -->
-        <HyperlinkButton x:Name="DetailsToggle" Grid.Row="5" Padding="0,2" Margin="0,-2,0,0" Click="OnToggleDetails">
-            <StackPanel Orientation="Horizontal" Spacing="4">
-                <TextBlock x:Name="DetailsToggleText" Text="Show details" Style="{StaticResource CaptionTextBlockStyle}" />
-                <FontIcon x:Name="DetailsChevron" FontSize="10" Glyph="&#xE70D;" />
-            </StackPanel>
-        </HyperlinkButton>
+        <!-- Details toggle + actions the user can always start (no AI needed) -->
+        <StackPanel Grid.Row="6" Orientation="Horizontal" Spacing="2" Margin="0,-2,0,0">
+            <HyperlinkButton x:Name="DetailsToggle" Padding="0,2,8,2" Click="OnToggleDetails">
+                <StackPanel Orientation="Horizontal" Spacing="4">
+                    <TextBlock x:Name="DetailsToggleText" Text="Details" Style="{StaticResource CaptionTextBlockStyle}" />
+                    <FontIcon x:Name="DetailsChevron" FontSize="10" Glyph="&#xE70D;" />
+                </StackPanel>
+            </HyperlinkButton>
+            <StackPanel x:Name="ManualActions" Orientation="Horizontal" Spacing="2" />
+        </StackPanel>
 
-        <ScrollViewer x:Name="DetailsPanel" Grid.Row="6" Visibility="Collapsed" MaxHeight="260" Margin="0,0,4,2"
+        <ScrollViewer x:Name="DetailsPanel" Grid.Row="7" Visibility="Collapsed" MaxHeight="260" Margin="0,0,4,2"
                       VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
             <RichTextBlock x:Name="DetailsText" FontSize="12" TextWrapping="Wrap" IsTextSelectionEnabled="True" Margin="0,0,8,0" />
         </ScrollViewer>

@@ -13,7 +13,7 @@ public enum FixActionId { OpenSettings, OpenFolder, RerunAsAdmin, CopyErrorText,
 public sealed record ValidatedAction(FixActionId Id, string Label, string? Target, bool RequiresConfirmation, bool RequiresOverride = false, string? OverrideReason = null);
 
 /// <summary>Outcome of validating an AI suggestion: an action, nothing suggested, or a rejection with the reason (shown in details).</summary>
-public sealed record ActionDecision(ValidatedAction? Action, string? RejectedReason)
+public sealed record ActionDecision(ValidatedAction? Action, string? RejectedReason, string? Hint = null)
 {
     public static readonly ActionDecision None = new(null, null);
 }
@@ -76,35 +76,111 @@ public static class FixActions
                 var key = (param ?? "").Trim();
                 if (key.StartsWith("ms-settings:", StringComparison.OrdinalIgnoreCase)) key = key["ms-settings:".Length..];
                 if (!SettingsPages.TryGetValue(key, out var label)) return Reject($"settings page \"{Trunc(param)}\" is not on the allowlist");
-                return Ok(new ValidatedAction(id, $"Open {label} settings", "ms-settings:" + key, RequiresConfirmation: false));
+                return Ok(new ValidatedAction(id, $"Open {label} settings", "ms-settings:" + key, RequiresConfirmation: true));
             }
             case FixActionId.OpenFolder:
             {
                 var folder = CheckFolder(param, redactor, out var why);
                 if (folder is null) return Reject(why!);
                 var shortName = Path.GetFileName(folder.TrimEnd('\\'));
-                return Ok(new ValidatedAction(id, $"Open folder {(shortName.Length > 0 ? shortName : folder)}", folder, RequiresConfirmation: false));
+                return Ok(new ValidatedAction(id, $"Open folder {(shortName.Length > 0 ? shortName : folder)}", folder, RequiresConfirmation: true));
             }
             case FixActionId.RerunAsAdmin:
             {
-                if (src.Kind != SourceKind.App) return Reject($"re-run as admin is only offered for normal programs (this is {src.Kind})");
-                if (facts.Dialog.BlockedByUipi || facts.Dialog.Process.Elevation == Dialogs.ElevationState.Elevated)
-                    return Reject("the program is already running as administrator");
-                if (src.Path is null || !File.Exists(src.Path) || !src.Path.EndsWith(".exe", StringComparison.OrdinalIgnoreCase))
-                    return Reject("the program's file couldn't be found");
-                // Never arguments, always a confirmation. Unsigned: only behind the red "unsigned" override (user decision).
-                // Never suggested for unsigned programs: the red "unsigned" override (M5) is something the user starts, not the AI.
-                if (src.Signature.State != SignatureState.Signed)
-                    return Reject("the program is unsigned, so huh never suggests running it as administrator");
-                return Ok(new ValidatedAction(id, $"Re-run {src.DisplayName} as administrator", src.Path, RequiresConfirmation: true));
+                var r = RerunEligibility(facts);
+                if (!r.Allowed) return new ActionDecision(null, r.Reason, r.Hint);
+                // Never suggested for unsigned programs: the red "unsigned" override is something the USER starts, not the AI.
+                if (r.NeedsOverride) return Reject("the program is unsigned, so huh never suggests running it as administrator");
+                return Ok(RerunAction(facts, needsOverride: false));
             }
             case FixActionId.CopyErrorText:
                 return Ok(new ValidatedAction(id, "Copy the error text", null, RequiresConfirmation: false));
             case FixActionId.SearchWeb:
                 // The query is built by huh from verified facts (redacted); the AI's parameter is ignored entirely.
-                return Ok(new ValidatedAction(id, "Search the web for this error", BuildSearchQuery(facts, redactor), RequiresConfirmation: false));
+                return Ok(new ValidatedAction(id, "Search the web for this error", BuildSearchQuery(facts, redactor), RequiresConfirmation: true));
         }
         return Reject("unsupported action");
+    }
+
+    // ------------------------------------------------------------------ re-run as administrator
+
+    /// <summary>Windows shell / system / script hosts: re-running them elevated (without arguments) never fixes the dialog and
+    /// would hand an attacker-chosen dialog a path to an elevated shell. Anything under %SystemRoot% is treated the same.</summary>
+    public static readonly IReadOnlySet<string> SystemProcesses = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+    {
+        "explorer", "csrss", "dllhost", "rundll32", "svchost", "conhost", "taskhostw", "sihost", "runtimebroker", "smss", "wininit",
+        "winlogon", "services", "lsass", "dwm", "fontdrvhost", "ctfmon", "consent", "werfault", "searchhost", "startmenuexperiencehost",
+        "shellexperiencehost", "applicationframehost", "textinputhost", "systemsettings", "mmc", "regsvr32", "msiexec", "cmd",
+        "powershell", "pwsh", "wscript", "cscript", "mshta", "wt", "openwith", "notepad", "taskmgr", "control",
+    };
+
+    public sealed record Eligibility(bool Allowed, bool NeedsOverride, string? Reason, string? Hint);
+
+    /// <summary>Can this dialog's program be offered "re-run as administrator"? Shared by AI suggestions and the manual action.</summary>
+    public static Eligibility RerunEligibility(DialogFacts facts)
+    {
+        var src = facts.Source;
+        var p = facts.Dialog.Process;
+        if (src.Kind != SourceKind.App)
+            return new(false, false, $"re-run as admin is only offered for normal desktop programs (this is {Describe(src.Kind)})", DialogButtonHint(facts));
+        if (IsSystemProgram(src.Path, p.Name))
+            return new(false, false, $"{src.ExeName ?? "this program"} is part of Windows, so huh never re-runs it as administrator", DialogButtonHint(facts));
+        if (facts.Dialog.BlockedByUipi || p.Elevation == Dialogs.ElevationState.Elevated)
+            return new(false, false, "the program is already running as administrator", null);
+        if (src.Path is null || !src.Path.EndsWith(".exe", StringComparison.OrdinalIgnoreCase) || !File.Exists(src.Path))
+            return new(false, false, "the program's file couldn't be found", null);
+        return src.Signature.State switch
+        {
+            SignatureState.Signed => new(true, false, null, null),
+            SignatureState.Unsigned => new(true, true, null, null), // only behind the red unsigned override, user-initiated
+            SignatureState.Invalid => new(false, false, $"the program's signature is invalid ({src.Signature.Detail})", null),
+            _ => new(false, false, "the program's signature couldn't be checked", null),
+        };
+    }
+
+    public static ValidatedAction RerunAction(DialogFacts facts, bool needsOverride) =>
+        new(FixActionId.RerunAsAdmin, $"Re-run {facts.Source.DisplayName} as administrator", facts.Source.Path, RequiresConfirmation: true,
+            RequiresOverride: needsOverride, OverrideReason: needsOverride ? $"{facts.Source.Path} is unsigned" : null);
+
+    public static bool IsSystemProgram(string? path, string? processName)
+    {
+        if (processName is not null && SystemProcesses.Contains(processName)) return true;
+        if (path is null) return false;
+        var win = Environment.GetFolderPath(Environment.SpecialFolder.Windows).TrimEnd('\\') + "\\";
+        try { return Path.GetFullPath(path).StartsWith(win, StringComparison.OrdinalIgnoreCase); }
+        catch { return false; }
+    }
+
+    /// <summary>Points at the dialog's own button (e.g. "Continue" with the UAC shield) instead of an elevated re-run.</summary>
+    public static string? DialogButtonHint(DialogFacts facts)
+    {
+        string[] preferred = ["Continue", "Try Again", "Retry", "Yes"];
+        var b = preferred.Select(p => facts.Dialog.Buttons.FirstOrDefault(x => string.Equals(StripAccel(x), p, StringComparison.OrdinalIgnoreCase)))
+                         .FirstOrDefault(x => x is not null);
+        return b is null ? null : $"Use the dialog's own “{StripAccel(b)}” button.";
+    }
+
+    private static string StripAccel(string s) => s.Replace("&", "").Trim();
+
+    private static string Describe(SourceKind k) => k switch
+    {
+        SourceKind.Windows => "Windows itself",
+        SourceKind.WebPage => "a web page",
+        SourceKind.StoreApp => "a Microsoft Store app",
+        _ => "a program",
+    };
+
+    /// <summary>Actions the user can start without AI: copy, search, and re-run as admin when eligible (unsigned => override).</summary>
+    public static IReadOnlyList<ValidatedAction> ManualActions(DialogFacts facts, Redactor redactor)
+    {
+        var list = new List<ValidatedAction>
+        {
+            new(FixActionId.CopyErrorText, "Copy the error text", null, RequiresConfirmation: false),
+            new(FixActionId.SearchWeb, "Search the web for this error", BuildSearchQuery(facts, redactor), RequiresConfirmation: true),
+        };
+        var r = RerunEligibility(facts);
+        if (r.Allowed) list.Add(RerunAction(facts, r.NeedsOverride));
+        return list;
     }
 
     internal static string? CheckFolder(string? param, Redactor redactor, out string? why)

@@ -19,7 +19,7 @@ internal sealed class BubbleManager(DispatcherQueue ui, AiExplainService ai, Fun
         if (dialog.Hwnd == 0 || _bubbles.ContainsKey(dialog.Hwnd)) return; // window-less UIA dialogs: no anchor yet
         // The dialog may already be gone by the time the UI thread gets here (it was busy, the user was quick).
         if (!Screen.IsVisible(dialog.Hwnd)) { DevLog.Write($"dialog 0x{dialog.Hwnd:X} gone before its bubble was shown"); return; }
-        var bubble = new BubbleWindow(facts);
+        var bubble = new BubbleWindow(facts, ai.Redactor);
         bubble.Dismissed += b => Close(b.Dialog.Hwnd);
         bubble.AiOptInRequested += _ => requestConsent();
         _bubbles[dialog.Hwnd] = bubble;
