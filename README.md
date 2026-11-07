@@ -13,10 +13,9 @@ that tells you:
 - **whether the dialog is legit**: which program raised it and whether that program is signed. A "Windows Security Error"
   that is really a web page in your browser gets labelled as one.
 
-<!-- DEMO GIF: replace with the 60-second demo (see docs/demo-script.md) -->
-<p align="center"><em>[ demo GIF goes here ]</em></p>
-
 ![huh next to Windows' "Destination Folder Access Denied" dialog: it explains that System32 is protected and points at the dialog's own Continue button](docs/images/system32-copy.png)
+
+<p align="center"><em>A demo video is coming soon.</em></p>
 
 ## Why
 
