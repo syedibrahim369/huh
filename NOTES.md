@@ -167,9 +167,14 @@ tests/Huh.Tests      xUnit v3 (Microsoft.Testing.Platform runner)
   Settings", a "Get a free key" link. `AiConsentAt` is now kept after turning AI off (re-enabling needs no new consent).
 - **Pre-warm**: at startup, facts pipeline on a sample (WinVerifyTrust embedded + catalog, FormatMessage, prompt) on a pool
   thread, then one bubble for `SampleFacts` built, DWM-cloaked, moved off-screen, shown, rendered for 3 frames, closed.
-  Release build, 6 runs each (screen locked): first bubble's first frame median ~375 ms with pre-warm vs ~670 ms without;
-  later bubbles ~285 ms. Outliers ~770 ms in 2/6 pre-warmed runs (one: the dialog's own app was slow, 570 ms detection; one
-  unexplained, 470 ms between show and first frame).
+  Measured to *visible* (see "Reveal" below), release build, 6 runs each: first bubble median 364 ms with pre-warm
+  (351-402) vs 499 ms without (484-559); later bubbles median 423 ms (380-497, n=24). (The earlier ~375/670/285 ms numbers
+  timed the first CompositionTarget.Rendering, before anything was on screen.)
+- **Reveal**: a bubble is shown DWM-cloaked and uncloaked after 3 rendered frames with no resize in between (400 ms
+  fallback timer); the entrance storyboard starts at the reveal. Before this, a WinUI window showed solid black for ~50-100 ms
+  (found by the frame-by-frame `motion` capture; 2 frames was not always enough, one capture showed only the backdrop).
+  Still open: when a late AI answer grows the bubble, the new strip is black for one frame (~30 ms). Fix idea: reserve the
+  answer's space while loading so the bubble shrinks instead of growing (a layout change, not done).
 - **Motion** (`Motion.cs`): entrance = 14 DIP slide from the dialog's side + fade (220/160 ms, cubic ease-out, compositor
   properties only), AI panel / confirmation fade-in, 120 ms fade-out on close. All skipped when `UISettings.AnimationsEnabled`
   is false (Settings › Accessibility › Visual effects › Animation effects). `HUH_ANIMATIONS=0|1` overrides for testing.
@@ -182,6 +187,17 @@ tests/Huh.Tests      xUnit v3 (Microsoft.Testing.Platform runner)
 - **Probe**: `capture --title X` screenshots one of huh's own windows after verifying (8 px grid, WindowFromPoint) that no
   other window covers it; refuses otherwise (it refused while the screen was locked: LockScreenBackstopFrame).
 - **Detection regression after M6** (screen locked): 30/30, 0/6 FP, p50 175 ms.
+- **On-screen checks (2026-11-07)**: bubble suite 46/46 against Debug and the release build. Tray: every item driven via UIA
+  Invoke on the menu (pause => no bubble for a test dialog, resume => bubble; AI off/on saved, no consent prompt when consent
+  exists; Start with Windows writes/removes the Run value; Settings; Quit). Second launch => Settings in the running copy.
+  Fresh profile => welcome => consent. Settings scrolled/expanded via UIA ScrollPattern/ExpandCollapse. `motion` filmstrips:
+  no black/empty frames in 7 runs; with HUH_ANIMATIONS=0 the first visible frame equals the last.
+- **Settings › Stored on this PC** shows `%LOCALAPPDATA%\...` instead of full paths (no user name in screenshots/bug reports).
+  The privacy-preview Expander got an AutomationProperties.Name (UIA/screen readers could not find it).
+- **Welcome step** is 470 DIP tall (it had the consent screen's 700, leaving a large gap); grows to 700 on Next.
+- **Probe additions**: `traymenu [--pick "Item"] [--dump]`, `motion [--ms N]`, `scroll`, `expand`; `capture` trims the 1 px
+  translucent border and clears the rounded corners (the desktop showed through there). Anything that takes focus first
+  waits for 3 s of no keyboard/mouse input (GetLastInputInfo).
 
 ## Gotchas
 - `SupportedOSPlatformVersion` can't be set globally: `net10.0-windows` has TargetPlatformVersion 7.0 (NETSDK1135).
@@ -246,6 +262,11 @@ tests/Huh.Tests      xUnit v3 (Microsoft.Testing.Platform runner)
   second launch of the Release build starts in ~270 ms.
 - PowerShell: `Get-ChildItem <dir> -File -Exclude x` without `-Recurse` matches nothing (a "clean" scan that scanned no files).
   The tool's guard blocks any command containing `Remove-Item` plus a C:\ path, and also misreads robocopy's `/E` as a path.
+- **The probe must ignore cloaked windows**: the start-up pre-warm bubble is "visible" to user32 while DWM-cloaked; the faster
+  release build overlapped it with the first test (10 failures until FindBubble skipped DWMWA_CLOAKED).
+- **Posting WM_KEYDOWN to a tray popup menu is unreliable** (each pick landed one menu late); invoke menu items through UIA.
+  The AI tray item is disabled in HUH_AI_FAKE mode, so UIA Invoke on it fails (by design).
+- A new folder means a new Defender scan: re-staging the release into a fresh folder made the first two launches take 16 s.
 
 ## Milestones
 - [x] M0 Setup
@@ -254,7 +275,7 @@ tests/Huh.Tests      xUnit v3 (Microsoft.Testing.Platform runner)
 - [x] M3 Deterministic decoding
 - [x] M4 AI explanation (opt-in)
 - [x] M5 Fix actions (on-screen checks done 2026-11-06, see "M5 on-screen results")
-- [ ] M6 Polish (code, release zip, README, demo script done; on-screen checks of the new windows pending: screen was locked)
+- [x] M6 Polish (on-screen checks done 2026-11-07, see "On-screen checks" under M6)
 
 ## Left / ideas
 - Localized dialogs: text cues are English-only. MessageBoxes are covered by the icon signal; TaskDialogs are not.

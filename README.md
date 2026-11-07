@@ -51,6 +51,16 @@ huh lives in the notification area. **Right-click the icon** for: pause/resume, 
 | ![The confirmation for opening a folder, showing the full path](docs/images/confirm-folder.png) | **Every action is confirmed first**, with exactly what will happen: here the full folder path (*your user name is redacted in this screenshot*). |
 | ![The red unsigned-program warning with an acknowledgement checkbox](docs/images/unsigned-override.png) | **Re-running an unsigned program as admin** is never suggested by the AI. If you start it yourself, you get a red warning with the path, *UNSIGNED* and *Arguments: none*, and the button stays disabled until you tick *I understand this program is unsigned*. |
 
+### First run, tray and Settings
+
+| | |
+|---|---|
+| ![Welcome window: what huh does, in three lines](docs/images/welcome.png) | **Welcome.** Three lines on what huh does, and where it lives (the notification area). |
+| ![Consent screen for AI explanations, with the free-tier caution first](docs/images/consent.png) | **AI is opt-in.** The free-tier caution comes first, then what is removed before sending. Nothing is sent until you turn it on. |
+| ![huh's tray menu: status, Pause, AI explanations, Start with Windows, Settings, Quit](docs/images/tray-menu.png) | **Tray menu.** Pause, AI on/off, Start with Windows (off by default), Settings, Quit. |
+| ![Settings: watching, Start with Windows, AI provider and models, API key](docs/images/settings.png) | **Settings** (Mica). Provider and models (applied immediately, validated), the API key, and per-app exclusions picked from apps huh has recently seen. |
+| ![Settings › Privacy: what is sent, removed and never sent, and the exact request preview](docs/images/settings-privacy.png) | **Privacy.** What is sent, what is removed, what is never sent, and the exact request, built by the same code as a real one (the key is shown as a placeholder). |
+
 ## How it works
 
 ```
@@ -169,12 +179,16 @@ numbers from the milestone runs, not targets.
 |---|---|
 | **Detection** ([report](docs/reports/m1-detection.md)) | **30/30** error dialogs from the harness detected and classified as errors (MessageBox, TaskDialog, shell file-operation errors, rundll32/regsvr32/msiexec, csrss hard errors, an Edge `alert()`, a custom window, a prompt-injection dialog); **0/6** false positives on info/question dialogs. Latency from first window event to classified dialog: p50 **149 ms**, p95 560 ms, max 1.17 s (the browser alert). |
 | **Admin apps (UIPI)** | An elevated app's dialog is detected and labelled "running as administrator, huh can't read it"; its text stays unreadable, as Windows intends. |
-| **Bubble** ([report](docs/reports/m2-bubble.md)) | **46/46** automated checks, 5 consecutive runs, dark and light theme: focus never stolen; placement matches the placement algorithm to the pixel at 5 screen positions and after a drag; z-order (including a covering window); minimize/restore; closes with the dialog. Mixed-DPI placement is covered by unit tests only (no second monitor). |
+| **Bubble** ([report](docs/reports/m2-bubble.md)) | **46/46** automated checks, 5 consecutive runs, dark and light theme: focus never stolen; placement matches the placement algorithm to the pixel at 5 screen positions and after a drag; z-order (including a covering window); minimize/restore; closes with the dialog. Re-run for 1.0 against both the Debug build and the release build: 46/46 each. Mixed-DPI placement is covered by unit tests only (no second monitor). |
+| **Tray, Settings, first run** | Driven on screen through UI Automation: every tray-menu item (pause stops bubbles and resume brings them back; AI on/off is saved; Start with Windows writes and removes the `Run` entry; Settings; Quit), a second launch opening Settings in the running copy, and welcome › consent on a fresh profile. |
+| **Animations** | Checked frame by frame (screen captures every ~35 ms over a plain backdrop): the bubble fades and slides in over ~220 ms; with `Animation effects` off, the first visible frame is already the final one. This found a black flash (a WinUI window is black until its first frame is drawn), now fixed: no black or empty frames in 7 runs (frames below the table). |
 | **Real-world dialogs** | Run dialog (name not found), empty `.msi`, Notepad *save to C:\\*, copy into System32: all four detected, placed and labelled correctly. |
 | **AI** ([report](docs/reports/m4-ai.md)) | Live latency **2.1–4.1 s** on `gemini-3.8-flash`; a repeat of the same error is answered from the local cache in **38 ms** with no request. When the primary returned HTTP 503 for about 10 minutes, huh fell back to `gemini-3.5-flash-lite`. 429 (quota) shows a clear message and keeps the on-device info. Development used fixtures; about 17 live calls in total. |
 | **Fix actions** | Checked on screen through UI Automation: Copy, open-folder, open-Settings and search confirmations; the unsigned override (disabled until ticked, then UAC started only the test program, verified elevated). |
-| **First bubble after start** (Release build) | Median **≈ 375 ms** from the dialog appearing to the bubble's first frame with pre-warm, vs ≈ 670 ms without (6 runs each); later bubbles ≈ 285 ms. 2 of 6 pre-warmed runs still took ≈ 770 ms: one because the dialog's own app was slow to start, one unexplained. |
+| **First bubble after start** (release build) | From the dialog's first window event to the bubble being **visible** (drawn and uncloaked): median **364 ms** with pre-warm (range 351–402), vs 499 ms without (484–559), 6 runs each; later bubbles: median 423 ms (380–497, 24 bubbles). So the first bubble is no slower than later ones. |
 | **Unit tests** | **235** (xUnit v3): error decoding against real codes (`0x80070005`, `0xC0000135`, 1619, …), classifier, placement on fake multi-monitor geometry, redaction, the prompt fence, Gemini response parsing from saved fixtures, "compromised model" fixtures, validation of every action including injection cases, click-time re-checks (swapped exe, folder replaced by a file), settings, Start with Windows, and the privacy preview matching the real request byte for byte. |
+
+![The bubble's entrance, captured frame by frame: 31 ms nearly transparent, 96 ms half faded in, 197 ms and later fully drawn](docs/images/entrance-frames.png)
 
 ## Known limitations
 
@@ -188,6 +202,8 @@ numbers from the milestone runs, not targets.
   unit-tested only.
 - **Unsigned release** (see the SmartScreen note above); the first launch after download can take several seconds while
   Defender scans it.
+- **A one-frame flicker when the AI answer arrives.** The bubble grows to fit the answer, and for one frame (~30 ms) the new
+  strip at the bottom is black before WinUI redraws it. (The same effect on the bubble's *first* appearance is fixed.)
 - **Heuristics.** Detection and the injection keyword check are rule-based; expect some misses and false alarms in real use.
   Per-app exclusions (*Settings › Excluded apps*) are the escape hatch.
 - **AI quality** depends on Gemini's free tier: it can be slow, busy or out of quota. huh then shows the on-device info alone.
@@ -225,7 +241,9 @@ Developer switches (environment variables):
 | `HUH_NO_PREWARM=1` | Skip the startup pre-warm (for measuring) |
 | `HUH_THEME=Light` / `=Dark` | Force the bubble's theme |
 
-Test tools: `tools/Huh.TestHarness` (`list`, `run <scenario>`), `tools/Huh.Probe` (`score`, `bubble`, `watch`, `snap`).
+Test tools: `tools/Huh.TestHarness` (`list`, `run <scenario>`), `tools/Huh.Probe` (`score`, `bubble`, `watch`, `snap`,
+`motion`, `traymenu`, `capture`, `click`, `scroll`, `expand`). Its screenshots only keep huh's and the harness's own
+pixels (it checks what covers the area first), and it waits for 3 s without keyboard or mouse input before anything that changes focus.
 Decisions, gotchas and what's left are in [NOTES.md](NOTES.md).
 
 ## Roadmap
@@ -237,7 +255,11 @@ Decisions, gotchas and what's left are in [NOTES.md](NOTES.md).
 
 ## Credits
 
-- Built by [@syedibrahim369](https://github.com/syedibrahim369) with Claude Code (Anthropic) as a pair programmer.
+- Designed and directed by Syed Ibrahim Mustafa; built with Claude Code as a pair programmer.
 - [Windows App SDK / WinUI 3](https://github.com/microsoft/WindowsAppSDK), [CsWin32](https://github.com/microsoft/CsWin32),
   [xUnit](https://xunit.net/), and Google's [Gemini API](https://ai.google.dev/) (free tier).
 - Segoe Fluent Icons (Windows) for the bubble's glyphs. The huh icon is generated by `tools/icons/make-icons.ps1`.
+
+## License
+
+[MIT](LICENSE).

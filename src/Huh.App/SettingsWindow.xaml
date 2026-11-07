@@ -175,7 +175,7 @@
                         <TextBlock TextWrapping="Wrap" Foreground="{ThemeResource SystemFillColorCautionBrush}" Style="{StaticResource CaptionTextBlockStyle}"
                                    Text="On the Gemini API free tier, Google may use what is sent to improve its products, and people may review it. Don't turn AI on if your error messages can contain confidential information." />
 
-                        <Expander x:Name="PreviewExpander" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch" Expanding="OnPreviewExpanding">
+                        <Expander x:Name="PreviewExpander" AutomationProperties.Name="See exactly what gets sent" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch" Expanding="OnPreviewExpanding">
                             <Expander.Header>
                                 <StackPanel Padding="0,6">
                                     <TextBlock Text="See exactly what gets sent" />

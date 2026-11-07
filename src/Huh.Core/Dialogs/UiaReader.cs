@@ -158,7 +158,7 @@ internal sealed class UiaReader
         {
             var e = found.GetElement(i);
             var type = e.get_CachedControlType();
-            if (type is not (UIA_CONTROLTYPE_ID.UIA_ButtonControlTypeId or UIA_CONTROLTYPE_ID.UIA_HyperlinkControlTypeId or UIA_CONTROLTYPE_ID.UIA_CheckBoxControlTypeId)) continue;
+            if (type is not (UIA_CONTROLTYPE_ID.UIA_ButtonControlTypeId or UIA_CONTROLTYPE_ID.UIA_HyperlinkControlTypeId or UIA_CONTROLTYPE_ID.UIA_CheckBoxControlTypeId or UIA_CONTROLTYPE_ID.UIA_MenuItemControlTypeId)) continue;
             var name = Native.Take(e.get_CachedName());
             if (exact ? !name.Equals(nameContains, StringComparison.OrdinalIgnoreCase) : !name.Contains(nameContains, StringComparison.OrdinalIgnoreCase)) continue;
             if (type == UIA_CONTROLTYPE_ID.UIA_CheckBoxControlTypeId)
@@ -172,6 +172,48 @@ internal sealed class UiaReader
             return $"invoked '{name}'";
         }
         return $"nothing named '*{nameContains}*' found";
+    }
+
+    /// <summary>Test tooling: expands the first expander/combo whose name contains the text (ExpandCollapse pattern).</summary>
+    public string Expand(nint hwnd, string nameContains)
+    {
+        var root = Automation.ElementFromHandle((HWND)hwnd);
+        var found = root.FindAllBuildCache(TreeScope.TreeScope_Descendants, _all, _cache);
+        for (int i = 0, n = found.get_Length(); i < n; i++)
+        {
+            var e = found.GetElement(i);
+            var name = Native.Take(e.get_CachedName());
+            if (!name.Contains(nameContains, StringComparison.OrdinalIgnoreCase)) continue;
+            try
+            {
+                e.GetCurrentPatternAs<IUIAutomationExpandCollapsePattern>(UIA_PATTERN_ID.UIA_ExpandCollapsePatternId, out var ec);
+                if (ec is null) continue;
+                ec.Expand();
+                return $"expanded '{name}'";
+            }
+            catch (Exception ex) when (ex is COMException or InvalidCastException or NullReferenceException) { }
+        }
+        return $"nothing expandable named '*{nameContains}*' found";
+    }
+
+    /// <summary>Test tooling: sets the vertical scroll position (0-100 %) of the first scrollable element in the window.</summary>
+    public string ScrollTo(nint hwnd, double verticalPercent)
+    {
+        var root = Automation.ElementFromHandle((HWND)hwnd);
+        var found = root.FindAllBuildCache(TreeScope.TreeScope_Subtree, _all, _cache);
+        for (int i = 0, n = found.get_Length(); i < n; i++)
+        {
+            var e = found.GetElement(i);
+            try
+            {
+                e.GetCurrentPatternAs<IUIAutomationScrollPattern>(UIA_PATTERN_ID.UIA_ScrollPatternId, out var sp);
+                if (sp is null || !sp.get_CurrentVerticallyScrollable()) continue;
+                sp.SetScrollPercent(-1 /* UIA_ScrollPatternNoScroll */, verticalPercent);
+                return $"scrolled to {verticalPercent}%";
+            }
+            catch (Exception ex) when (ex is COMException or InvalidCastException or NullReferenceException) { }
+        }
+        return "nothing scrollable found";
     }
 
     /// <summary>Screen rectangle of an element in physical pixels, or null if it's gone / has no area.</summary>

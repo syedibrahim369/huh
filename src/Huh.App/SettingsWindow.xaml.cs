@@ -227,13 +227,28 @@ public sealed partial class SettingsWindow : Window
 
         var stored = new List<string>
         {
-            $"Settings and the list of recently seen apps (exe names only): {HuhPaths.Settings}",
-            KeyStore.HasStoredKey() ? $"Your API key, encrypted with Windows DPAPI for your account: {HuhPaths.Key}" : "No API key is saved by huh.",
-            $"Saved AI answers ({SafeCount()}), kept 30 days, no dialog text: {HuhPaths.AiCache}",
-            $"A diagnostics log of window events, never message text: {HuhPaths.Logs}",
+            $"Settings and the list of recently seen apps (exe names only): {Display(HuhPaths.Settings)}",
+            KeyStore.HasStoredKey() ? $"Your API key, encrypted with Windows DPAPI for your account: {Display(HuhPaths.Key)}" : "No API key is saved by huh.",
+            $"Saved AI answers ({SafeCount()}), kept 30 days, no dialog text: {Display(HuhPaths.AiCache)}",
+            $"A diagnostics log of window events, never message text: {Display(HuhPaths.Logs)}",
         };
         StoredText.Text = string.Join("\n", stored.Select(x => "• " + x));
         if (PreviewExpander.IsExpanded) UpdatePreview();
+    }
+
+    /// <summary>
+    /// Paths as %LOCALAPPDATA%... / %USERPROFILE%... so a screenshot of this page (e.g. in a bug report) doesn't show the
+    /// Windows user name. Pasting either form into Explorer's address bar still works.
+    /// </summary>
+    internal static string Display(string path)
+    {
+        foreach (var (folder, name) in new[] { (Environment.SpecialFolder.LocalApplicationData, "%LOCALAPPDATA%"), (Environment.SpecialFolder.UserProfile, "%USERPROFILE%") })
+        {
+            var root = Environment.GetFolderPath(folder).TrimEnd(Path.DirectorySeparatorChar);
+            if (root.Length > 0 && path.StartsWith(root + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
+                return name + path[root.Length..];
+        }
+        return path;
     }
 
     private int SafeCount()

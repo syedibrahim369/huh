@@ -117,9 +117,12 @@ public sealed partial class BubbleWindow : Window
         DevLog.Write($"bubble 0x{Hwnd:X}: show beside dialog 0x{Dialog.Hwnd:X} ({Dialog.Process.Name})");
         if (!Reposition()) return false;
         DevLog.Write($"bubble 0x{Hwnd:X}: anchor={LastAnchor.Left},{LastAnchor.Top},{LastAnchor.Right},{LastAnchor.Bottom}");
-        if (Motion.Enabled) PlayEntrance(_side);
-        LogFirstFrame();
+        // Shown cloaked, revealed once XAML has drawn: a WinUI window is solid black until its first frame is presented, which
+        // showed as a ~50-100 ms black flash (caught by the M6 frame-by-frame capture).
+        var entrance = Motion.Enabled ? PrepareEntrance(_side) : null;
+        Screen.Cloak(Hwnd, true);
         Screen.ShowNoActivate(Hwnd);
+        RevealWhenDrawn(entrance);
         return true;
     }
 
@@ -133,6 +136,7 @@ public sealed partial class BubbleWindow : Window
         LastAnchor = anchor;
         var placement = BubblePlacer.Place(anchor, WidthDip, _lastHeightDip, Screen.GetMonitors());
         Screen.PlaceAbove(Hwnd, Dialog.Hwnd, placement.Rect);
+        _revealFrames = 0;
         _side = placement.Side;
         // Crossing onto a monitor with another scale triggers WM_DPICHANGED, and WinUI then applies Windows' suggested size.
         // Place once more after that settles so our (placer-computed) size wins. Not testable on the single-monitor dev box.
@@ -594,7 +598,7 @@ public sealed partial class BubbleWindow : Window
     // ------------------------------------------------------------------ motion + pre-warm (M6)
 
     /// <summary>Slides ~14 DIP out from the dialog's side while fading in. Transform + opacity run on the compositor.</summary>
-    private void PlayEntrance(BubbleSide side)
+    private Storyboard PrepareEntrance(BubbleSide side)
     {
         const double d = 14;
         var (x, y) = side switch
@@ -613,20 +617,41 @@ public sealed partial class BubbleWindow : Window
         Motion.Add(sb, t, "X", 0, 220, ease);
         Motion.Add(sb, t, "Y", 0, 220, ease);
         Motion.Add(sb, Root, "Opacity", 1, 160, null);
-        sb.Begin();
+        return sb; // begun when the bubble is uncloaked
     }
 
-    /// <summary>Logs when the bubble's first frame is rendered, relative to the dialog's first window event (for the pre-warm numbers).</summary>
-    private void LogFirstFrame()
+    /// <summary>Uncloaks once the first frame is on screen, starts the entrance, and logs when the bubble became visible relative to the dialog's first window event.</summary>
+    // Frames rendered since the bubble was shown (cloaked) or last resized; Reposition() resets it, because a newly grown
+    // area is black until the next frame is presented (e.g. a cached AI answer arriving just before the reveal).
+    private int _revealFrames;
+
+    private void RevealWhenDrawn(Storyboard? entrance)
     {
+        // Rendering fires before each frame is drawn; after three with no resize in between, the content is on screen (two was
+        // not always enough in the frame-by-frame capture: one frame showed only the backdrop). A timer makes
+        // sure the bubble is revealed even if rendering stalls.
+        _revealFrames = 0;
+        bool revealed = false;
         EventHandler<object>? handler = null;
-        handler = (_, _) =>
+        var fallback = DispatcherQueue.CreateTimer();
+        void Reveal(string why)
         {
+            if (revealed) return;
+            revealed = true;
             CompositionTarget.Rendering -= handler;
+            fallback.Stop();
+            if (_closing) return;
+            Screen.Cloak(Hwnd, false);
+            entrance?.Begin();
             var sinceRead = (DateTimeOffset.Now - Dialog.DetectedAt).TotalMilliseconds;
-            DevLog.Write($"bubble 0x{Hwnd:X}: first frame {Dialog.LatencyMs + sinceRead:F0} ms after the dialog appeared ({sinceRead:F0} ms after it was read)");
-        };
+            DevLog.Write($"bubble 0x{Hwnd:X}: visible {Dialog.LatencyMs + sinceRead:F0} ms after the dialog appeared ({sinceRead:F0} ms after it was read){why}");
+        }
+        handler = (_, _) => { if (++_revealFrames >= 3) Reveal(""); };
         CompositionTarget.Rendering += handler;
+        fallback.Interval = TimeSpan.FromMilliseconds(400);
+        fallback.IsRepeating = false;
+        fallback.Tick += (_, _) => Reveal(" (fallback timer)");
+        fallback.Start();
     }
 
     /// <summary>
@@ -644,7 +669,7 @@ public sealed partial class BubbleWindow : Window
             Screen.MoveTo(w.Hwnd, PxRect.FromSize(-32000, -32000, 425, 400));
             w.SetAiLoading("prewarm");
             w.Request(Huh.Core.Actions.FixActions.ManualActions(w.Facts, redactor).First(a => a.RequiresConfirmation));
-            if (Motion.Enabled) w.PlayEntrance(BubbleSide.Right);
+            if (Motion.Enabled) w.PrepareEntrance(BubbleSide.Right).Begin();
             Screen.ShowNoActivate(w.Hwnd);
         }
         catch (Exception ex) { DevLog.Write($"prewarm (bubble) failed: {ex}"); return; }

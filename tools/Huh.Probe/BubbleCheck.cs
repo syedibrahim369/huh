@@ -36,6 +36,8 @@ internal static class BubbleCheck
         for (var sw = Stopwatch.StartNew(); sw.ElapsedMilliseconds < 15000 && ready is null; Thread.Sleep(100))
             ready = ReadFrom(log, logStart).Split('\n').FirstOrDefault(l => l.Contains("monitor started"));
         Console.WriteLine(ready is null ? "app did not report ready within 15 s" : $"app ready: {ready.Trim()}");
+        // Let the start-up pre-warm (a cloaked, off-screen bubble) finish so it cannot be mistaken for, or race with, test 1.
+        for (var sw = Stopwatch.StartNew(); sw.ElapsedMilliseconds < 10000 && !ReadFrom(log, logStart).Contains("prewarm: bubble") && !ReadFrom(log, logStart).Contains("prewarm: off"); Thread.Sleep(100)) { }
         Thread.Sleep(300);
         var ctx = new Ctx(harness, app.Id, outDir);
         var monitors = CoreScreen.GetMonitors();
@@ -366,6 +368,10 @@ internal static class BubbleCheck
         return found;
     }
 
+    /// <summary>DWM-cloaked windows (huh's start-up pre-warm bubble) are "visible" to user32 but never on screen.</summary>
+    private static bool IsCloaked(nint h) => DwmGetWindowAttribute(h, 14 /* DWMWA_CLOAKED */, out int c, 4) == 0 && c != 0;
+    [DllImport("dwmapi.dll")] private static extern int DwmGetWindowAttribute(nint h, int attr, out int value, int size);
+
     private static nint FindBubble(int huhPid) => FindWindowOfPid(huhPid, "WinUIDesktopWin32WindowClass");
 
     private static nint FindWindowOfPid(int pid, string cls)
@@ -374,7 +380,7 @@ internal static class BubbleCheck
         EnumWindows((h, _) =>
         {
             GetWindowThreadProcessId(h, out var p);
-            if (p == pid && IsWindowVisible(h) && ClassOf(h) == cls) { found = h; return false; }
+            if (p == pid && IsWindowVisible(h) && !IsCloaked(h) && ClassOf(h) == cls) { found = h; return false; }
             return true;
         }, 0);
         return found;
@@ -391,10 +397,154 @@ internal static class BubbleCheck
     /// <summary>Test-only: bypass the foreground lock (a background process may not normally take focus).</summary>
     private static void ForceForeground(nint hwnd)
     {
+        WaitForIdle();
         keybd_event(0x12 /*VK_MENU*/, 0, 0, 0);
         keybd_event(0x12, 0, 2 /*KEYUP*/, 0);
         SetForegroundWindow(hwnd);
     }
+
+    /// <summary>
+    /// Filmstrip of a bubble's entrance (huh must already be running). A fading bubble is partly see-through, so a plain
+    /// harness window is first stretched over the whole monitor as the backdrop; every frame is kept only if each window
+    /// above that backdrop over the bubble's rectangle belongs to huh or the harness. Frames: about every 16 ms for 400 ms.
+    /// Also prints the mean pixel difference between the first and last frame.
+    /// </summary>
+    public static int Motion(string harness, string outPath, int durationMs = 400)
+    {
+        var huh = Process.GetProcessesByName("Huh").FirstOrDefault();
+        if (huh is null) { Console.Error.WriteLine("huh is not running"); return 2; }
+        WaitForIdle();
+        using var backdrop = Process.Start(new ProcessStartInfo(harness, "run neg-plain-window") { UseShellExecute = false, CreateNoWindow = true })!;
+        nint bd = WaitFor(() => FindWindowOfPid(backdrop.Id, "HuhHarnessWindow"), 5000);
+        if (bd == 0) { Console.Error.WriteLine("backdrop window did not appear"); return 1; }
+        var mon = CoreScreen.GetMonitors()[0].Bounds;
+        SetWindowPos(bd, 0, mon.Left, mon.Top, mon.Width, mon.Height, 0x0040 /*SHOWWINDOW*/);
+        Thread.Sleep(500); // backdrop painted and settled
+        var trusted = new HashSet<uint> { (uint)huh.Id, (uint)backdrop.Id };
+        using var dialogProc = Process.Start(new ProcessStartInfo(harness, "run mb-error-access-denied") { UseShellExecute = false, CreateNoWindow = true })!;
+        trusted.Add((uint)dialogProc.Id);
+        try
+        {
+            nint bubble = WaitFor(() => FindBubble(huh.Id), 5000);
+            if (bubble == 0) { Console.Error.WriteLine("no bubble"); return 1; }
+            var sw = Stopwatch.StartNew();
+            var frames = new List<(long ms, Bitmap bmp)>();
+            while (sw.ElapsedMilliseconds < durationMs)
+            {
+                if (CoreScreen.FrameBounds(bubble) is not { } r) break;
+                if (!OnlyTrustedAbove(bd, r, trusted, out var who)) { Console.Error.WriteLine($"frame dropped: {who} overlaps the bubble"); return 1; }
+                var bmp = new Bitmap(r.Width, r.Height, PixelFormat.Format32bppArgb);
+                using (var g = Graphics.FromImage(bmp)) g.CopyFromScreen(r.Left, r.Top, 0, 0, bmp.Size);
+                frames.Add((sw.ElapsedMilliseconds, bmp));
+                Thread.Sleep(10);
+            }
+            if (frames.Count == 0) return 1;
+            // Pick up to 6 frames spread over the capture, then lay them out side by side at half size with a time label.
+            var times = durationMs <= 400 ? new[] { 0, 30, 60, 100, 160, 380 } : Enumerable.Range(0, 6).Select(i => i * durationMs / 5).ToArray();
+            var picks = times.Select(t => frames.MinBy(f => Math.Abs(f.ms - t))).Distinct().ToList();
+            int fw = frames[0].bmp.Width / 2, fh = frames[0].bmp.Height / 2, pad = 8, label = 26;
+            using var strip = new Bitmap(picks.Count * (fw + pad) + pad, fh + label + 2 * pad, PixelFormat.Format32bppArgb);
+            using (var g = Graphics.FromImage(strip))
+            {
+                g.Clear(Color.FromArgb(32, 32, 32));
+                g.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.HighQualityBicubic;
+                using var font = new Font("Segoe UI", 11f, GraphicsUnit.Pixel);
+                for (int i = 0; i < picks.Count; i++)
+                {
+                    int x = pad + i * (fw + pad);
+                    g.DrawImage(picks[i].bmp, x, pad + label, fw, fh);
+                    g.DrawString($"{picks[i].ms} ms", font, Brushes.White, x, pad);
+                }
+            }
+            strip.Save(outPath, ImageFormat.Png);
+            // How different is the first frame from the last? ~0 means it appeared fully formed (animations off).
+            double diff = MeanDiff(frames[0].bmp, frames[^1].bmp);
+            Console.WriteLine($"saved {outPath}: {frames.Count} frames over {frames[^1].ms} ms; first-vs-last frame mean pixel difference {diff:F1}");
+            // Any frame with near-black rows = content not drawn yet (the window is black until XAML presents a frame).
+            var black = frames.Where(f => BlackRows(f.bmp) > 2).Select(f => $"{f.ms} ms ({BlackRows(f.bmp)} rows)").ToList();
+            Console.WriteLine(black.Count == 0 ? "no black frames" : $"BLACK: {string.Join(", ", black)}");
+            var blank = frames.Where(f => LumaStdDev(f.bmp) < 6).Select(f => $"{f.ms} ms").ToList();
+            Console.WriteLine(blank.Count == 0 ? "no blank (backdrop-only) frames" : $"BLANK: {string.Join(", ", blank)}");
+            foreach (var f in frames) f.bmp.Dispose();
+            return 0;
+        }
+        finally
+        {
+            try { dialogProc.Kill(); } catch { }
+            try { backdrop.Kill(); } catch { }
+        }
+    }
+
+    /// <summary>True if every visible window above <paramref name="backdrop"/> in z-order that intersects <paramref name="r"/> belongs to a trusted process.</summary>
+    private static bool OnlyTrustedAbove(nint backdrop, Huh.Core.Placement.PxRect r, HashSet<uint> trusted, out string who)
+    {
+        string bad = "";
+        bool reached = false;
+        EnumWindows((h, _) =>
+        {
+            if (h == backdrop) { reached = true; return false; }
+            if (!IsWindowVisible(h) || IsCloaked(h) || CoreScreen.FrameBounds(h) is not { } w) return true;
+            bool overlaps = w.Left < r.Right && r.Left < w.Right && w.Top < r.Bottom && r.Top < w.Bottom;
+            GetWindowThreadProcessId(h, out var pid);
+            if (overlaps && !trusted.Contains(pid)) { bad = Describe(h); return false; }
+            return true;
+        }, 0);
+        who = bad;
+        return reached && bad.Length == 0;
+    }
+
+    private static double LumaStdDev(Bitmap b)
+    {
+        double s = 0, s2 = 0; int n = 0;
+        for (int y = 2; y < b.Height - 2; y += 3)
+            for (int x = 2; x < b.Width - 2; x += 3) { var p = b.GetPixel(x, y); double l = 0.3 * p.R + 0.59 * p.G + 0.11 * p.B; s += l; s2 += l * l; n++; }
+        double m = s / n; return Math.Sqrt(Math.Max(0, s2 / n - m * m));
+    }
+
+    private static int BlackRows(Bitmap b)
+    {
+        int rows = 0;
+        for (int y = 2; y < b.Height - 2; y++)
+        {
+            int dark = 0, n = 0;
+            for (int x = 4; x < b.Width - 4; x += 6) { var p = b.GetPixel(x, y); if (p.R + p.G + p.B < 15) dark++; n++; }
+            if (dark > n * 0.9) rows++;
+        }
+        return rows;
+    }
+
+    private static double MeanDiff(Bitmap a, Bitmap b)
+    {
+        long sum = 0; int n = 0;
+        for (int y = 0; y < Math.Min(a.Height, b.Height); y += 4)
+            for (int x = 0; x < Math.Min(a.Width, b.Width); x += 4)
+            {
+                var p = a.GetPixel(x, y); var q = b.GetPixel(x, y);
+                sum += Math.Abs(p.R - q.R) + Math.Abs(p.G - q.G) + Math.Abs(p.B - q.B); n++;
+            }
+        return n == 0 ? 0 : sum / (double)n / 3;
+    }
+
+    /// <summary>
+    /// Never inject input while someone is using the PC: wait until the keyboard and mouse have been idle for 3 s
+    /// (GetLastInputInfo), logging once if we had to wait.
+    /// </summary>
+    public static void WaitForIdle(int idleMs = 3000)
+    {
+        bool logged = false;
+        while (true)
+        {
+            var lii = new LASTINPUTINFO { cbSize = (uint)Marshal.SizeOf<LASTINPUTINFO>() };
+            if (!GetLastInputInfo(ref lii)) return;
+            uint idle = (uint)Environment.TickCount - lii.dwTime;
+            if (idle >= idleMs) return;
+            if (!logged) { Console.Error.WriteLine("waiting for keyboard/mouse to be idle for 3 s..."); logged = true; }
+            Thread.Sleep(Math.Max(100, idleMs - (int)idle));
+        }
+    }
+
+    [StructLayout(LayoutKind.Sequential)] private struct LASTINPUTINFO { public uint cbSize; public uint dwTime; }
+    [DllImport("user32.dll")] private static extern bool GetLastInputInfo(ref LASTINPUTINFO lii);
 
     /// <summary>
     /// Screenshot of one window, cropped to its visible frame. Before copying, every point on an 8 px grid over the frame must
@@ -411,8 +561,21 @@ internal static class BubbleCheck
                 var root = h == 0 ? 0 : GetAncestor(h, 2 /* GA_ROOT */);
                 if (root != hwnd) { Console.Error.WriteLine($"not captured: another window ({Describe(root)}) covers ({x},{y})"); return false; }
             }
-        using var bmp = new Bitmap(frame.Width, frame.Height, PixelFormat.Format32bppArgb);
-        using (var g = Graphics.FromImage(bmp)) g.CopyFromScreen(frame.Left, frame.Top, 0, 0, bmp.Size);
+        // Windows 11 frames are rounded and their 1 px border is translucent, so the desktop shows through at the edges.
+        // Drop the border row/column on every side and make everything outside the rounded corners transparent.
+        const int inset = 1;
+        int w = frame.Width - 2 * inset, hgt = frame.Height - 2 * inset;
+        int radius = (int)Math.Ceiling(8 * GetDpiForWindow(hwnd) / 96.0);
+        using var bmp = new Bitmap(w, hgt, PixelFormat.Format32bppArgb);
+        using (var g = Graphics.FromImage(bmp)) g.CopyFromScreen(frame.Left + inset, frame.Top + inset, 0, 0, bmp.Size);
+        for (int cy = 0; cy < radius; cy++)
+            for (int cx = 0; cx < radius; cx++)
+            {
+                double dx = radius - cx - 0.5, dy = radius - cy - 0.5;
+                if (dx * dx + dy * dy <= (radius - 1) * (radius - 1)) continue;
+                foreach (var (px, py) in new[] { (cx, cy), (w - 1 - cx, cy), (cx, hgt - 1 - cy), (w - 1 - cx, hgt - 1 - cy) })
+                    bmp.SetPixel(px, py, Color.Transparent);
+            }
         bmp.Save(outPath, ImageFormat.Png);
         Console.WriteLine($"saved {outPath} ({bmp.Width}x{bmp.Height})");
         return true;
@@ -428,6 +591,7 @@ internal static class BubbleCheck
     [DllImport("user32.dll")] private static extern bool IsWindowVisible(nint h);
     [DllImport("user32.dll")] private static extern bool IsWindow(nint h);
     [DllImport("user32.dll")] private static extern nint GetForegroundWindow();
+    [DllImport("user32.dll")] private static extern uint GetDpiForWindow(nint h);
     [DllImport("user32.dll")] private static extern bool SetForegroundWindow(nint h);
     [DllImport("user32.dll")] private static extern void keybd_event(byte vk, byte scan, uint flags, nint extra);
     [DllImport("user32.dll")] private static extern int GetWindowLongW(nint h, int idx);

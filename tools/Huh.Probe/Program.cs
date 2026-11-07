@@ -80,8 +80,8 @@ if (mode == "click" && Opt("--text") is { } clickText)
 
 if (mode == "capture" && Opt("--title") is { } capTitle)
 {
-    // Screenshot of ONE of huh's own windows (Settings, welcome) via PrintWindow: the window renders itself into a bitmap, so
-    // nothing else on the desktop can end up in the image, even if another window covers it.
+    // Screenshot of ONE of huh's own windows (Settings, welcome), refused unless that window is fully uncovered
+    // (BubbleCheck.CaptureWindow), so nothing else on the desktop can end up in the image.
     var huhPids = Process.GetProcessesByName("Huh").Select(p => (uint)p.Id).ToHashSet();
     nint target = 0;
     Diag.EnumWindows((h, _) =>
@@ -96,6 +96,71 @@ if (mode == "capture" && Opt("--title") is { } capTitle)
     Directory.CreateDirectory(Path.GetDirectoryName(outPath)!);
     return BubbleCheck.CaptureWindow(target, outPath) ? 0 : 1;
 }
+
+if (mode is "scroll" or "expand" && Opt("--title") is { } uiTitle)
+{
+    // Test tooling for screenshots: scroll / expand inside one of huh's windows through UI Automation (no input injected).
+    var huhPids = Process.GetProcessesByName("Huh").Select(p => (uint)p.Id).ToHashSet();
+    nint target = 0;
+    Diag.EnumWindows((h, _) =>
+    {
+        Diag.GetWindowThreadProcessId(h, out var pid);
+        var t = new StringBuilder(512); Diag.GetWindowTextW(h, t, 512);
+        if (huhPids.Contains(pid) && Diag.IsWindowVisible(h) && t.ToString().Contains(uiTitle, StringComparison.OrdinalIgnoreCase)) { target = h; return false; }
+        return true;
+    }, 0);
+    if (target == 0) { Console.Error.WriteLine($"no visible huh window titled '{uiTitle}'"); return 1; }
+    var uia = new Huh.Core.Dialogs.UiaReader();
+    string r = mode == "scroll"
+        ? uia.ScrollTo(target, double.Parse(Opt("--percent") ?? "100", System.Globalization.CultureInfo.InvariantCulture))
+        : uia.Expand(target, Opt("--text") ?? "");
+    Console.WriteLine(r);
+    return r.StartsWith("nothing", StringComparison.Ordinal) ? 1 : 0;
+}
+
+if (mode == "traymenu")
+{
+    // Opens huh's tray menu exactly as a right click would (the tray window's NOTIFYICON_VERSION_4 callback message with
+    // WM_CONTEXTMENU), captures the menu, then closes it with a message posted to the menu window: no global input.
+    var huhPids = Process.GetProcessesByName("Huh").Select(p => (uint)p.Id).ToHashSet();
+    nint tray = Diag.FindWindowW("huh.TrayWindow", null);
+    if (tray == 0) { Console.Error.WriteLine("huh's tray window not found"); return 1; }
+    BubbleCheck.WaitForIdle(); // the menu takes the foreground while open
+    int ax = int.Parse(Opt("--x") ?? "1700"), ay = int.Parse(Opt("--y") ?? "1150");
+    Diag.PostMessageW(tray, 0x8000 + 1, (nint)((ay << 16) | (ax & 0xFFFF)), 0x007B /* WM_CONTEXTMENU */);
+    nint menu = 0;
+    for (int i = 0; i < 40 && menu == 0; i++)
+    {
+        Thread.Sleep(100);
+        Diag.EnumWindows((h, _) =>
+        {
+            Diag.GetWindowThreadProcessId(h, out var pid);
+            var cls = new StringBuilder(64); Diag.GetClassNameW(h, cls, 64);
+            if (huhPids.Contains(pid) && Diag.IsWindowVisible(h) && cls.ToString() == "#32768") { menu = h; return false; }
+            return true;
+        }, 0);
+    }
+    if (menu == 0) { Console.Error.WriteLine("menu did not appear"); return 1; }
+    Thread.Sleep(400); // menu fade-in
+    var outMenu = Opt("--out") ?? RepoPath("artifacts", "m6", "tray-menu.png");
+    Directory.CreateDirectory(Path.GetDirectoryName(outMenu)!);
+    bool ok = BubbleCheck.CaptureWindow(menu, outMenu);
+    // --pick "Item" invokes that menu item through UI Automation (as a screen reader would); default: close the menu.
+    if (args.Contains("--dump"))
+        foreach (var n in new Huh.Core.Dialogs.UiaReader().Read(menu).Nodes) Console.WriteLine($"  {n.ControlType,-12} '{n.Name}'");
+    if (Opt("--pick") is { } pickText)
+    {
+        var r = new Huh.Core.Dialogs.UiaReader().Activate(menu, pickText, exact: true);
+        Console.WriteLine(r);
+        if (r.StartsWith("nothing", StringComparison.Ordinal)) { Diag.PostMessageW(menu, 0x0100, 0x1B, 0); return 1; }
+    }
+    else Diag.PostMessageW(menu, 0x0100 /* WM_KEYDOWN */, 0x1B /* VK_ESCAPE */, 0);
+    return ok ? 0 : 1;
+}
+
+if (mode == "motion")
+    return BubbleCheck.Motion(Opt("--harness") ?? RepoPath("tools", "Huh.TestHarness", "bin", "Debug", "net10.0-windows", "Huh.TestHarness.exe"),
+        Opt("--out") ?? RepoPath("artifacts", "m6", "motion.png"), int.Parse(Opt("--ms") ?? "400"));
 
 if (mode == "snap")
 {
@@ -227,4 +292,6 @@ internal static class Diag
     [DllImport("user32.dll")] public static extern bool IsWindowVisible(nint h);
     [DllImport("user32.dll")] public static extern nint GetWindow(nint h, uint cmd);
     [DllImport("user32.dll")] public static extern int GetWindowLongW(nint h, int idx);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern nint FindWindowW(string? cls, string? title);
+    [DllImport("user32.dll")] public static extern bool PostMessageW(nint h, uint msg, nint w, nint l);
 }

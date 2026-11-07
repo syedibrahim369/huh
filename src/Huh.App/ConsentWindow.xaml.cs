@@ -15,12 +15,15 @@ public sealed partial class ConsentWindow : Window
     /// <summary>Raised after the user decides (true = AI on).</summary>
     public event Action<bool>? Decided;
 
+    // The welcome step is three lines; giving it the consent screen's height left a large empty gap.
+    private const int WelcomeHeight = 470, ConsentHeight = 700;
+
     internal ConsentWindow(HuhSettings settings, bool showWelcome)
     {
         _settings = settings;
         InitializeComponent();
         AppWindow.SetIcon(Path.Combine(AppContext.BaseDirectory, "Assets", "huh.ico"));
-        AppWindow.Resize(Scale(new Windows.Graphics.SizeInt32(560, 700)));
+        AppWindow.Resize(Scale(new Windows.Graphics.SizeInt32(560, showWelcome ? WelcomeHeight : ConsentHeight)));
         if (showWelcome)
         {
             Title = "Welcome to huh";
@@ -57,6 +60,8 @@ public sealed partial class ConsentWindow : Window
         Title = "huh: AI explanations";
         WelcomePanel.Visibility = Visibility.Collapsed;
         ConsentPanel.Visibility = Visibility.Visible;
+        AppWindow.Resize(Scale(new Windows.Graphics.SizeInt32(560, ConsentHeight)));
+        CenterOnScreen();
         if (Motion.Enabled) Motion.FadeIn(ConsentPanel, 160);
     }
 

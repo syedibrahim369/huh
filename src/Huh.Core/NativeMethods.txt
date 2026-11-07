@@ -128,3 +128,5 @@ IUIAutomationTreeWalker
 IUIAutomationInvokePattern
 IUIAutomationTogglePattern
 UIA_PATTERN_ID
+IUIAutomationScrollPattern
+IUIAutomationExpandCollapsePattern
